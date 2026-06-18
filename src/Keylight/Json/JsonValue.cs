@@ -68,7 +68,7 @@ namespace Keylight.Json {
     }
 
     /// <summary>Returns the numeric value as double, or null if not a number.</summary>
-    public double? AsDouble() {
+    internal double? AsDouble() {
       if (_kind != JKind.Number || _str == null) return null;
       if (double.TryParse(_str, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
         return v;
@@ -77,16 +77,6 @@ namespace Keylight.Json {
 
     /// <summary>Returns the bool value, or null if not a boolean token.</summary>
     public bool? AsBool() => _kind == JKind.Bool ? (bool?)_bool : null;
-
-    /// <summary>Object property lookup. Returns false if this is not an object or the key is absent.</summary>
-    public bool TryGet(string key, out JsonValue? value) {
-      if (_kind == JKind.Object && _obj != null && _obj.TryGetValue(key, out var v)) {
-        value = v;
-        return true;
-      }
-      value = null;
-      return false;
-    }
 
     /// <summary>Object property lookup. Returns null if not an object or key is absent.</summary>
     public JsonValue? Get(string key) {

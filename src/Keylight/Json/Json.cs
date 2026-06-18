@@ -75,17 +75,10 @@ namespace Keylight.Json {
           sb.Append(i.ToString(CultureInfo.InvariantCulture));
           break;
         case double d:
-          // Use integer form when applicable
-          if (d == Math.Floor(d) && !double.IsInfinity(d) && !double.IsNaN(d))
-            sb.Append(((long)d).ToString(CultureInfo.InvariantCulture));
-          else
-            sb.Append(d.ToString("G", CultureInfo.InvariantCulture));
+          WriteNumber(sb, d);
           break;
         case float f:
-          if (f == Math.Floor(f) && !float.IsInfinity(f) && !float.IsNaN(f))
-            sb.Append(((long)f).ToString(CultureInfo.InvariantCulture));
-          else
-            sb.Append(f.ToString("G", CultureInfo.InvariantCulture));
+          WriteNumber(sb, f);
           break;
         case string s:
           sb.Append('"');
@@ -99,6 +92,13 @@ namespace Keylight.Json {
           sb.Append('"');
           break;
       }
+    }
+
+    private static void WriteNumber(StringBuilder sb, double d) {
+      if (d == Math.Floor(d) && !double.IsInfinity(d) && !double.IsNaN(d))
+        sb.Append(((long)d).ToString(CultureInfo.InvariantCulture));
+      else
+        sb.Append(d.ToString("G", CultureInfo.InvariantCulture));
     }
 
     internal static void WriteEscapedString(StringBuilder sb, string s) {
@@ -182,11 +182,7 @@ namespace Keylight.Json {
       // Number
       var d = value.AsDouble();
       if (d.HasValue) {
-        // Prefer integer representation
-        if (d.Value == Math.Floor(d.Value) && !double.IsInfinity(d.Value) && !double.IsNaN(d.Value))
-          sb.Append(((long)d.Value).ToString(CultureInfo.InvariantCulture));
-        else
-          sb.Append(d.Value.ToString("G", CultureInfo.InvariantCulture));
+        WriteNumber(sb, d.Value);
         return;
       }
       // Null (handled above, this is a safety fallback)
@@ -263,8 +259,7 @@ namespace Keylight.Json {
           var key = keyVal.AsString()!;
           SkipWhitespace();
           Expect(':');
-          var value = ReadValue();
-          if (value == null) throw new FormatException("Null value in object");
+          var value = ReadValue()!;
           obj[key] = value;
           SkipWhitespace();
           var next = Peek();
@@ -284,9 +279,7 @@ namespace Keylight.Json {
           return JsonValue.MakeArray(arr);
         }
         while (true) {
-          var value = ReadValue();
-          if (value == null) throw new FormatException("Null value in array");
-          arr.Add(value);
+          arr.Add(ReadValue()!);
           SkipWhitespace();
           var next = Peek();
           if (next == ']') { _pos++; break; }

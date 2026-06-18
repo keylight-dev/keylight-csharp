@@ -103,7 +103,7 @@ namespace Keylight {
     public async Task ActivateAsync(string licenseKey, CancellationToken ct = default) {
       var req = new ActivateRequest {
         LicenseKey   = licenseKey,
-        InstanceName = Device.DefaultInstanceName(),
+        InstanceName = Device.DefaultInstanceName,
         AppVersion   = _config.AppVersion,
         SdkVersion   = SdkInfo.Version,
         Platform     = _config.Platform ?? Device.Platform

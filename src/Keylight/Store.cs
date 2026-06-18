@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Keylight.Json;
 
@@ -75,13 +74,6 @@ namespace Keylight {
     // -------------------------------------------------------------------
 
     internal static string SerializeCachedState(CachedState state) {
-      var obj = new Dictionary<string, object?> {
-        ["instanceId"] = state.InstanceId,
-        ["fetchedAt"]  = (object?)state.FetchedAt
-      };
-      if (state.TrialStartedAt.HasValue)
-        obj["trialStartedAt"] = (object?)state.TrialStartedAt.Value;
-
       // Lease is serialized as a sub-object using WireHelpers
       // We build the JSON string manually to include the lease sub-object
       var sb = new System.Text.StringBuilder();
@@ -131,13 +123,8 @@ namespace Keylight {
       state.InstanceId = root.Get("instanceId")?.AsString();
       state.FetchedAt  = root.Get("fetchedAt")?.AsLong() ?? 0;
 
-      var trialNode = root.Get("trialStartedAt");
-      state.TrialStartedAt = (trialNode != null && !trialNode.IsNull) ? trialNode.AsLong() : null;
-
-      var leaseNode = root.Get("lease");
-      state.Lease = (leaseNode != null && !leaseNode.IsNull)
-        ? WireHelpers.ParseLease(leaseNode)
-        : null;
+      state.TrialStartedAt = root.Get("trialStartedAt")?.AsLong();
+      state.Lease = WireHelpers.ParseLease(root.Get("lease"));
 
       return state;
     }

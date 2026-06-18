@@ -69,10 +69,8 @@ namespace Keylight {
       var resp = new ActivateResponse();
       resp.Activated = root.Get("activated")?.AsBool() ?? false;
       resp.InstanceId = root.Get("instance_id")?.AsString();
-      var expAt = root.Get("license_expires_at");
-      resp.LicenseExpiresAt = (expAt != null && !expAt.IsNull) ? expAt.AsLong() : null;
-      var leaseNode = root.Get("lease");
-      resp.Lease = (leaseNode != null && !leaseNode.IsNull) ? WireHelpers.ParseLease(leaseNode) : null;
+      resp.LicenseExpiresAt = root.Get("license_expires_at")?.AsLong();
+      resp.Lease = WireHelpers.ParseLease(root.Get("lease"));
       return resp;
     }
   }
@@ -89,10 +87,8 @@ namespace Keylight {
       if (root == null) return null;
       var resp = new ValidateResponse();
       resp.Valid = root.Get("valid")?.AsBool() ?? false;
-      var expAt = root.Get("license_expires_at");
-      resp.LicenseExpiresAt = (expAt != null && !expAt.IsNull) ? expAt.AsLong() : null;
-      var leaseNode = root.Get("lease");
-      resp.Lease = (leaseNode != null && !leaseNode.IsNull) ? WireHelpers.ParseLease(leaseNode) : null;
+      resp.LicenseExpiresAt = root.Get("license_expires_at")?.AsLong();
+      resp.Lease = WireHelpers.ParseLease(root.Get("lease"));
       resp.Error = root.Get("error")?.AsString();
       return resp;
     }
@@ -103,7 +99,7 @@ namespace Keylight {
     /// Parse a Lease from a JsonValue node.
     /// Reads camelCase keys as they come from the server.
     /// </summary>
-    internal static Lease? ParseLease(JsonValue node) {
+    internal static Lease? ParseLease(JsonValue? node) {
       if (node == null || node.IsNull) return null;
       var lease = new Lease();
       lease.Kid            = node.Get("kid")?.AsString()            ?? "";

@@ -36,29 +36,19 @@ namespace Keylight {
         if (root == null) return null;
 
         // primary_kid must be a string
-        var primaryKidVal = root.Get("primary_kid");
-        if (primaryKidVal == null || primaryKidVal.IsNull) return null;
-        var primaryKid = primaryKidVal.AsString();
+        var primaryKid = root.Get("primary_kid")?.AsString();
         if (primaryKid == null) return null;
 
         // keys must be an array
-        var keysVal = root.Get("keys");
-        if (keysVal == null || keysVal.IsNull) return null;
-        var keysArr = keysVal.AsArray();
+        var keysArr = root.Get("keys")?.AsArray();
         if (keysArr == null) return null;
 
         var keys = new Dictionary<string, string>();
         foreach (var entry in keysArr) {
-          // kid must be a string
-          var kidVal = entry.Get("kid");
-          if (kidVal == null || kidVal.IsNull) return null;
-          var kid = kidVal.AsString();
+          var kid = entry.Get("kid")?.AsString();
           if (kid == null) return null;
 
-          // public_key must be a string
-          var pkVal = entry.Get("public_key");
-          if (pkVal == null || pkVal.IsNull) return null;
-          var publicKey = pkVal.AsString();
+          var publicKey = entry.Get("public_key")?.AsString();
           if (publicKey == null) return null;
 
           keys[kid] = publicKey;

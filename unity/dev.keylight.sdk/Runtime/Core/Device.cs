@@ -23,12 +23,16 @@ namespace Keylight {
     ///   1. HOSTNAME env var
     ///   2. COMPUTERNAME env var (Windows)
     ///   3. RuntimeInformation.OSDescription (coarse but always available)
+    ///
+    /// Evaluated once at process start (hostname is process-stable).
     /// </summary>
-    public static string DefaultInstanceName() {
+    public static readonly string DefaultInstanceName = ResolveInstanceName();
+
+    private static string ResolveInstanceName() {
       var host = Environment.GetEnvironmentVariable("HOSTNAME")
         ?? Environment.GetEnvironmentVariable("COMPUTERNAME");
-      if (!string.IsNullOrEmpty(host)) return host;
-      return RuntimeInformation.OSDescription ?? "unknown-device";
+      return !string.IsNullOrEmpty(host) ? host
+        : RuntimeInformation.OSDescription ?? "unknown-device";
     }
   }
 }

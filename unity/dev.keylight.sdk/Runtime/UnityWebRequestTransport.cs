@@ -91,7 +91,7 @@ namespace Keylight.Unity {
     // ─── private helpers ─────────────────────────────────────────────────────
 
     private string BuildUrl(string action) =>
-      $"{_baseUrl}/{_tenantId}/{_productId}/{action}";
+      Keylight.TransportHelpers.BuildUrl(_baseUrl, _tenantId, _productId, action);
 
     /// <summary>
     /// POST <paramref name="jsonBody"/> to <c>{baseUrl}/{tenantId}/{productId}/{action}</c>,
@@ -134,10 +134,7 @@ namespace Keylight.Unity {
           uwr.result == UnityWebRequest.Result.DataProcessingError) {
         throw new ActivationException(0, $"Network error: {uwr.error}");
       }
-      if (statusCode < 200 || statusCode >= 300) {
-        throw new ActivationException(statusCode,
-          $"Keylight API returned HTTP {statusCode}: {uwr.downloadHandler.text}");
-      }
+      Keylight.TransportHelpers.EnsureSuccess(statusCode, uwr.downloadHandler.text);
 
       return uwr.downloadHandler.text;
     }
