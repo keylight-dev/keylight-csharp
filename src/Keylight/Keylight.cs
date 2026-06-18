@@ -19,6 +19,15 @@ namespace Keylight {
     // deterministic clock without altering production behaviour.
     private readonly Func<long> _nowSeconds;
 
+    // ─── in-memory cache ─────────────────────────────────────────────────────
+    // Eliminates redundant _store.Load() + Ed25519 calls on read paths.
+    // Written only from write paths (ActivateAsync, ValidateAsync, DeactivateAsync,
+    // CheckOnLaunchAsync trial-start) which are not called concurrently per the
+    // documented contract. Read paths only read these fields — no lock needed.
+    private bool          _cachePopulated;      // false until first RefreshCache()
+    private CachedState?  _cachedState;         // null when store is empty
+    private VerifyResult? _cachedVerifyResult;  // null when no lease on disk
+
     private static long RealNow() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
     // ─── constructors ────────────────────────────────────────────────────────
@@ -120,6 +129,7 @@ namespace Keylight {
         FetchedAt  = _nowSeconds()
       };
       _store.Save(state);
+      RefreshCache();
     }
 
     /// <summary>
@@ -127,7 +137,9 @@ namespace Keylight {
     /// returns a new lease.
     /// </summary>
     public async Task ValidateAsync(CancellationToken ct = default) {
-      var cached = _store.Load();
+      // Use cached state; prime if needed.
+      if (!_cachePopulated) RefreshCache();
+      var cached = _cachedState;
       var instanceId = cached?.InstanceId ?? "";
 
       var req = new ValidateRequest {
@@ -155,6 +167,7 @@ namespace Keylight {
           FetchedAt  = _nowSeconds()
         };
         _store.Save(newState);
+        RefreshCache();
       }
     }
 
@@ -163,7 +176,10 @@ namespace Keylight {
     /// expiry. A no-op if no license is stored.
     /// </summary>
     public async Task RefreshIfNeededAsync(CancellationToken ct = default) {
-      var cached = _store.Load();
+      // Use cached state to avoid a redundant _store.Load().
+      // If cache is unpopulated, prime it now.
+      if (!_cachePopulated) RefreshCache();
+      var cached = _cachedState;
       if (cached == null) return;
 
       var now = _nowSeconds();
@@ -186,7 +202,9 @@ namespace Keylight {
     /// the server call succeeds, mirroring JS/Rust parity.
     /// </summary>
     public async Task DeactivateAsync(CancellationToken ct = default) {
-      var cached = _store.Load();
+      // Use cached state; prime if needed.
+      if (!_cachePopulated) RefreshCache();
+      var cached = _cachedState;
       var instanceId = cached?.InstanceId;
 
       if (!string.IsNullOrEmpty(instanceId)) {
@@ -199,6 +217,7 @@ namespace Keylight {
       }
 
       _store.Clear();
+      RefreshCache();
     }
 
     /// <summary>
@@ -209,9 +228,14 @@ namespace Keylight {
     /// trusted active license is present.
     /// </summary>
     public async Task CheckOnLaunchAsync(CancellationToken ct = default) {
-      var cached = _store.Load();
-      if (cached != null)
+      // Prime the cache before any reads below.
+      RefreshCache();
+
+      if (_cachedState != null)
         await RefreshIfNeededAsync(ct).ConfigureAwait(false);
+      // Note: RefreshIfNeededAsync → ValidateAsync may call RefreshCache()
+      // internally (via _store.Save → RefreshCache), so _cachedState reflects
+      // the latest state after it returns.
 
       // Auto-start trial: once, idempotent, only when no trusted active license
       // and TrialDurationDays is configured.
@@ -220,10 +244,12 @@ namespace Keylight {
         bool hasActiveLicense = trusted != null && trusted.Status == "active";
 
         if (!hasActiveLicense) {
-          var current = _store.Load() ?? new CachedState { FetchedAt = _nowSeconds() };
+          // Use the cached state; fall back to a fresh CachedState for first launch.
+          var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
           if (!current.TrialStartedAt.HasValue) {
             current.TrialStartedAt = _nowSeconds();
             _store.Save(current);
+            RefreshCache();
           }
         }
       }
@@ -245,6 +271,23 @@ namespace Keylight {
     public void Deactivate()
       => DeactivateAsync().GetAwaiter().GetResult();
 
+    // ─── cache management ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads from disk once and caches both the <see cref="CachedState"/> and
+    /// the <see cref="VerifyResult"/> (signature verification result). Call this
+    /// after every write path that mutates the store so read paths always see
+    /// current state without hitting disk or re-running Ed25519.
+    /// </summary>
+    private void RefreshCache() {
+      var loaded = _store.Load();
+      _cachedState = loaded;
+      _cachedVerifyResult = (loaded?.Lease != null)
+        ? Verifier.VerifyLease(loaded.Lease, _config.TrustedKeys, _nowSeconds(), Verifier.SkewSeconds)
+        : (VerifyResult?)null;
+      _cachePopulated = true;
+    }
+
     // ─── private helpers ─────────────────────────────────────────────────────
 
     /// <summary>
@@ -253,18 +296,23 @@ namespace Keylight {
     /// "gated" lease used by HasEntitlement.
     /// </summary>
     private Lease? GetCachedTrustedLease() {
+      // Ensure cache is populated (first read after construction or after a
+      // write path has not yet called RefreshCache — defensive guard).
+      if (!_cachePopulated) RefreshCache();
+
       if (_config.MaxOfflineDays > 0) {
-        var cached = _store.Load();
-        if (cached == null) return null;
-        var offlineSeconds = _nowSeconds() - cached.FetchedAt;
+        if (_cachedState == null) return null;
+        var offlineSeconds = _nowSeconds() - _cachedState.FetchedAt;
         if (offlineSeconds > (long)_config.MaxOfflineDays * 86400) return null;
       }
 
-      var raw = _store.Load()?.Lease;
+      var raw = _cachedState?.Lease;
       if (raw == null) return null;
 
-      var r = Verifier.VerifyLease(raw, _config.TrustedKeys, _nowSeconds(), Verifier.SkewSeconds);
-      return (Verifier.IsTrusted(r) && !r.Expired && raw.Status != "expired") ? raw : null;
+      // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
+      var r = _cachedVerifyResult!.Value;
+      bool expired = _nowSeconds() > raw.ExpiresAt + Verifier.SkewSeconds;
+      return (Verifier.IsTrusted(r) && !expired && raw.Status != "expired") ? raw : null;
     }
 
     /// <summary>
@@ -272,16 +320,22 @@ namespace Keylight {
     /// offline-grace gating for the status read — mirrors JS state() logic).
     /// </summary>
     private KeylightState ResolveState() {
-      var rawLease = _store.Load()?.Lease;
+      // Ensure cache is populated.
+      if (!_cachePopulated) RefreshCache();
+
+      var rawLease = _cachedState?.Lease;
       if (rawLease == null) return CheckTrialOrInvalid();
 
-      var r = Verifier.VerifyLease(rawLease, _config.TrustedKeys, _nowSeconds(), Verifier.SkewSeconds);
+      // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
+      var r = _cachedVerifyResult!.Value;
       if (!Verifier.IsTrusted(r)) return CheckTrialOrInvalid();
+
+      bool expired = _nowSeconds() > rawLease.ExpiresAt + Verifier.SkewSeconds;
 
       // Trusted lease: resolve by status
       switch (rawLease.Status) {
         case "active":
-          if (!r.Expired) return KeylightState.Licensed;
+          if (!expired) return KeylightState.Licensed;
           // Stale active lease: fall through to Expired
           return KeylightState.Expired;
         case "expired":
@@ -296,9 +350,10 @@ namespace Keylight {
 
     private KeylightState CheckTrialOrInvalid() {
       if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
-        var cached = _store.Load();
-        if (cached?.TrialStartedAt.HasValue == true) {
-          var trialStart = cached.TrialStartedAt.Value;
+        // _cachedState is already populated by the caller (ResolveState or
+        // GetCachedTrustedLease) so no additional _store.Load() is needed.
+        if (_cachedState?.TrialStartedAt.HasValue == true) {
+          var trialStart = _cachedState.TrialStartedAt.Value;
           var trialEndSeconds = trialStart + (long)_config.TrialDurationDays.Value * 86400L;
           return _nowSeconds() < trialEndSeconds
             ? KeylightState.Trial
