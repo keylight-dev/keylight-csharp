@@ -6,9 +6,16 @@ using System.Text.Json.Serialization;
 namespace Keylight {
   /// <summary>Cached lease state persisted between process runs.</summary>
   public sealed class CachedState {
-    [JsonPropertyName("lease")]      public Lease?  Lease      { get; set; }
-    [JsonPropertyName("instanceId")] public string? InstanceId { get; set; }
-    [JsonPropertyName("fetchedAt")]  public long    FetchedAt  { get; set; }
+    [JsonPropertyName("lease")]          public Lease?  Lease          { get; set; }
+    [JsonPropertyName("instanceId")]     public string? InstanceId     { get; set; }
+    [JsonPropertyName("fetchedAt")]      public long    FetchedAt      { get; set; }
+    /// <summary>
+    /// Unix-second timestamp of when the trial was started on this device.
+    /// Null until the first <see cref="KeylightClient.CheckOnLaunchAsync"/> call
+    /// on a fresh install with <c>TrialDurationDays</c> configured.
+    /// Once set it is never reset (idempotent trial start).
+    /// </summary>
+    [JsonPropertyName("trialStartedAt")] public long?   TrialStartedAt { get; set; }
   }
 
   /// <summary>Pluggable storage backend for the cached lease state.</summary>

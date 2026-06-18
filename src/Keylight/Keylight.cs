@@ -203,12 +203,30 @@ namespace Keylight {
 
     /// <summary>
     /// Called on app launch: refreshes the lease if a license is stored and
-    /// the cached lease is stale or near expiry.
+    /// the cached lease is stale or near expiry. Also auto-starts the trial
+    /// (persists <c>TrialStartedAt</c>) on the first launch when
+    /// <see cref="KeylightConfig.TrialDurationDays"/> is configured and no
+    /// trusted active license is present.
     /// </summary>
     public async Task CheckOnLaunchAsync(CancellationToken ct = default) {
       var cached = _store.Load();
       if (cached != null)
         await RefreshIfNeededAsync(ct).ConfigureAwait(false);
+
+      // Auto-start trial: once, idempotent, only when no trusted active license
+      // and TrialDurationDays is configured.
+      if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
+        var trusted = GetCachedTrustedLease();
+        bool hasActiveLicense = trusted != null && trusted.Status == "active";
+
+        if (!hasActiveLicense) {
+          var current = _store.Load() ?? new CachedState { FetchedAt = _nowSeconds() };
+          if (!current.TrialStartedAt.HasValue) {
+            current.TrialStartedAt = _nowSeconds();
+            _store.Save(current);
+          }
+        }
+      }
     }
 
     // ─── public API — sync wrappers ──────────────────────────────────────────
@@ -279,9 +297,13 @@ namespace Keylight {
     private KeylightState CheckTrialOrInvalid() {
       if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
         var cached = _store.Load();
-        // If we have a stored trial start, check remaining days
-        // (For now: no explicit trial start tracking in this store model;
-        //  this path is for future trial-start integration)
+        if (cached?.TrialStartedAt.HasValue == true) {
+          var trialStart = cached.TrialStartedAt.Value;
+          var trialEndSeconds = trialStart + (long)_config.TrialDurationDays.Value * 86400L;
+          return _nowSeconds() < trialEndSeconds
+            ? KeylightState.Trial
+            : KeylightState.Expired;
+        }
       }
       return KeylightState.Invalid;
     }
