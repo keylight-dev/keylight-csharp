@@ -1,0 +1,10 @@
+{
+  "name": "dev.keylight.sdk",
+  "version": "0.1.0",
+  "displayName": "Keylight",
+  "description": "Offline-first licensing for Unity — signed Ed25519 leases, activations, entitlements.",
+  "unity": "2021.3",
+  "keywords": ["licensing", "license", "drm", "ed25519"],
+  "author": { "name": "Keylight", "url": "https://keylight.dev" },
+  "samples": [{ "displayName": "Keylight Notes", "description": "Activate a key and gate a Pro feature.", "path": "Samples~/Notes" }]
+}

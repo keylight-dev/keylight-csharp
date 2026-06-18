@@ -8,3 +8,16 @@ artifacts/
 samples/**/bin/
 samples/**/obj/
 samples/**/.godot/
+
+# Unity-generated files
+unity/**/*.meta
+unity/**/[Ll]ibrary/
+unity/**/[Tt]emp/
+unity/**/[Oo]bj/
+unity/**/[Bb]uild/
+unity/**/[Bb]uilds/
+unity/**/[Ll]ogs/
+unity/**/[Uu]ser[Ss]ettings/
+unity/**/*.pidb.meta
+unity/**/*.pdb.meta
+unity/**/.DS_Store
