@@ -1,0 +1,108 @@
+using System.Text.Json;
+using Keylight;
+using Xunit;
+
+public class TransportTests {
+  private static readonly JsonSerializerOptions Options = HttpClientTransport.SerializerOptions;
+
+  [Fact]
+  public void ActivateRequest_serializes_snake_case_fields() {
+    var req = new ActivateRequest {
+      LicenseKey = "K",
+      InstanceName = "Mac",
+      AppVersion = "1.0",
+      SdkVersion = "0.1.0",
+      Platform = "macOS"
+    };
+
+    var json = JsonSerializer.Serialize(req, Options);
+
+    Assert.Contains("\"license_key\":\"K\"", json);
+    Assert.Contains("\"instance_name\":\"Mac\"", json);
+    Assert.Contains("\"app_version\":\"1.0\"", json);
+    Assert.Contains("\"sdk_version\":\"0.1.0\"", json);
+    Assert.Contains("\"platform\":\"macOS\"", json);
+  }
+
+  [Fact]
+  public void ActivateRequest_omits_null_free_tier_instance_id() {
+    var req = new ActivateRequest {
+      LicenseKey = "K",
+      InstanceName = "Mac"
+    };
+
+    var json = JsonSerializer.Serialize(req, Options);
+
+    Assert.DoesNotContain("free_tier_instance_id", json);
+  }
+
+  [Fact]
+  public void ActivateRequest_includes_free_tier_instance_id_when_set() {
+    var req = new ActivateRequest {
+      LicenseKey = "K",
+      InstanceName = "Mac",
+      FreeTierInstanceId = "ft-123"
+    };
+
+    var json = JsonSerializer.Serialize(req, Options);
+
+    Assert.Contains("\"free_tier_instance_id\":\"ft-123\"", json);
+  }
+
+  [Fact]
+  public void ValidateRequest_serializes_required_fields() {
+    var req = new ValidateRequest {
+      InstanceId = "inst-abc"
+    };
+
+    var json = JsonSerializer.Serialize(req, Options);
+
+    Assert.Contains("\"instance_id\":\"inst-abc\"", json);
+    Assert.DoesNotContain("app_version", json);
+    Assert.DoesNotContain("sdk_version", json);
+    Assert.DoesNotContain("platform", json);
+  }
+
+  [Fact]
+  public void DeactivateRequest_serializes_both_fields() {
+    var req = new DeactivateRequest {
+      InstanceId = "inst-xyz"
+    };
+
+    var json = JsonSerializer.Serialize(req, Options);
+
+    Assert.Contains("\"instance_id\":\"inst-xyz\"", json);
+  }
+
+  [Fact]
+  public void ActivateResponse_deserializes_activated_and_instance_id() {
+    var json = "{\"activated\":true,\"instance_id\":\"id-1\",\"license_expires_at\":null}";
+    var resp = JsonSerializer.Deserialize<ActivateResponse>(json, Options);
+
+    Assert.NotNull(resp);
+    Assert.True(resp!.Activated);
+    Assert.Equal("id-1", resp.InstanceId);
+    Assert.Null(resp.LicenseExpiresAt);
+  }
+
+  [Fact]
+  public void ActivateResponse_deserializes_lease() {
+    var json = "{\"activated\":true,\"instance_id\":\"id-1\",\"license_expires_at\":1234567890,\"lease\":{\"kid\":\"k1\",\"licenseKeyHash\":\"h\",\"instanceId\":\"id-1\",\"issuedAt\":100,\"expiresAt\":200,\"status\":\"active\",\"entitlements\":[\"pro\"],\"signature\":\"sig\"}}";
+    var resp = JsonSerializer.Deserialize<ActivateResponse>(json, Options);
+
+    Assert.NotNull(resp);
+    Assert.NotNull(resp!.Lease);
+    Assert.Equal("k1", resp.Lease!.Kid);
+    Assert.Equal(1234567890L, resp.LicenseExpiresAt);
+  }
+
+  [Fact]
+  public void ValidateResponse_deserializes_valid_and_lease() {
+    var json = "{\"valid\":false,\"license_expires_at\":null}";
+    var resp = JsonSerializer.Deserialize<ValidateResponse>(json, Options);
+
+    Assert.NotNull(resp);
+    Assert.False(resp!.Valid);
+    Assert.Null(resp.Lease);
+  }
+}
