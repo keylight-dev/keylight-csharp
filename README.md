@@ -1,9 +1,10 @@
 # Keylight C# SDK
 
+[![CI](https://github.com/keylight-dev/keylight-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/keylight-dev/keylight-csharp/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/Keylight.svg)](https://www.nuget.org/packages/Keylight)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Targets](https://img.shields.io/badge/targets-netstandard2.0%20%C2%B7%20net8.0-success.svg)](#runtime-support)
-[![Conformance](https://img.shields.io/badge/conformance-cross--SDK%20vectors-success.svg)](#conformance)
+[![Conformance](https://img.shields.io/badge/conformance-8%2F8%20cross--SDK%20vectors-success.svg)](#conformance)
 
 Open-source C# SDK for [Keylight](https://keylight.dev) — license your .NET, Godot, and Unity apps
 with online activation and offline Ed25519 license verification.
@@ -72,7 +73,7 @@ Targets **`netstandard2.0`** (broad compatibility: .NET Framework 4.6.1+, .NET C
 Godot 4 via NuGet) and **`net8.0`**. The only external dependency on `netstandard2.0` is
 `System.Text.Json 8.0.5` (built in on `net8.0`).
 
-A Unity UPM package is planned — see [Other SDKs](#other-sdks).
+A Unity UPM package (`dev.keylight.sdk`) is available — see [Godot and Unity](#godot-and-unity).
 
 ## Quick Start
 
@@ -252,8 +253,10 @@ Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
 `.csproj` or use the Godot editor's NuGet integration. The `netstandard2.0` target is compatible
 with Godot's .NET 6+ Mono runtime.
 
-**Unity** — a UPM (Unity Package Manager) package is planned. For now, reference the NuGet package
-via a scoped registry or [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity).
+**Unity** — a UPM (Unity Package Manager) package (`dev.keylight.sdk`) is included in this repo
+under `unity/dev.keylight.sdk`. Install it via Unity's Package Manager (UPM) using the Git URL, or
+via [OpenUPM](https://openupm.com) once published. The package source is kept in sync with
+`src/Keylight` via `unity/sync-core.sh`.
 
 ## Conformance
 
@@ -280,7 +283,7 @@ dotnet test tests/Keylight.Tests
 | Rust (CLIs/daemons/Tauri) | Available | [keylight-rust](https://github.com/keylight-dev/keylight-rust) |
 | JavaScript/TypeScript | Available | [keylight-js](https://github.com/keylight-dev/keylight-js) |
 | C# (this repo) | Available | [keylight-csharp](https://github.com/keylight-dev/keylight-csharp) |
-| Unity (UPM) | Planned | unified by the same cross-SDK conformance vectors |
+| Unity (UPM) | Available | [keylight-csharp](https://github.com/keylight-dev/keylight-csharp) — `unity/dev.keylight.sdk` |
 | C++ | Planned | unified by the same cross-SDK conformance vectors |
 
 ## License
