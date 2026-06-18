@@ -1,0 +1,10 @@
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/bin/Debug/netstandard2.0/Keylight.deps.json
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/bin/Debug/netstandard2.0/Keylight.dll
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/bin/Debug/netstandard2.0/Keylight.pdb
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.csproj.AssemblyReference.cache
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.GeneratedMSBuildEditorConfig.editorconfig
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.AssemblyInfoInputs.cache
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.AssemblyInfo.cs
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.csproj.CoreCompileInputs.cache
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.dll
+/Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/obj/Debug/netstandard2.0/Keylight.pdb

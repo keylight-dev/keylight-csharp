@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = Keylight
+build_property.ProjectDir = /Users/halloweed/Coding/Projects/keylight-csharp/src/Keylight/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 
