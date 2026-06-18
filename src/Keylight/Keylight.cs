@@ -101,6 +101,11 @@ namespace Keylight {
     ///   Server returned a non-success status or <c>activated=false</c>.
     /// </exception>
     public async Task ActivateAsync(string licenseKey, CancellationToken ct = default) {
+      // Client-side key-format guard: fail fast before any network call.
+      if (!string.IsNullOrEmpty(_config.KeyPrefix) &&
+          !licenseKey.StartsWith(_config.KeyPrefix, StringComparison.Ordinal))
+        throw new ActivationException(0, $"License key does not match expected prefix '{_config.KeyPrefix}'.");
+
       var req = new ActivateRequest {
         LicenseKey   = licenseKey,
         InstanceName = Device.DefaultInstanceName,

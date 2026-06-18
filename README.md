@@ -60,8 +60,8 @@ Licensing shouldn't mean bolting a heavyweight, phone-home-or-die SDK onto your 
 - **Trials** — Built-in local trial timer, auto-started on first launch via `CheckOnLaunchAsync`.
 - **Device Telemetry** — Auto-attaches `sdk_version`, `platform`, and (optional) `app_version`
   on every API call.
-- **Network Resilience** — Retries with exponential backoff; validate network failures are
-  non-fatal (the client retains whatever state the cached lease dictates).
+- **Network Resilience** — Validate network failures are non-fatal (the client retains whatever
+  state the cached lease dictates).
 - **Pluggable** — Swap the storage backend (`ILeaseStore`) or HTTP transport (`IKeylightTransport`)
   via interfaces for tests or custom platforms.
 - **Nullable-annotated** — Targets `netstandard2.0` and `net8.0`; ships with `#nullable enable`
@@ -70,8 +70,8 @@ Licensing shouldn't mean bolting a heavyweight, phone-home-or-die SDK onto your 
 ## Runtime Support
 
 Targets **`netstandard2.0`** (broad compatibility: .NET Framework 4.6.1+, .NET Core 2.0+, Mono,
-Godot 4 via NuGet) and **`net8.0`**. The only external dependency on `netstandard2.0` is
-`System.Text.Json 8.0.5` (built in on `net8.0`).
+Godot 4 via NuGet) and **`net8.0`**. The core library has **zero runtime dependencies** — pure
+managed code with no NuGet references (important for IL2CPP/WebGL targets).
 
 A Unity UPM package (`dev.keylight.sdk`) is available — see [Godot and Unity](#godot-and-unity).
 
@@ -148,7 +148,7 @@ that cannot use `async`/`await` (every `await` in the async path uses `Configure
 |-------|---------|
 | `Licensed` | Current, signature-valid `active` lease. |
 | `Trial` | No license, but a local trial is active. |
-| `Expired` | Lease expired, or a previously stored license is no longer current. |
+| `Expired` | Lease expired, or a previously stored license is no longer current. Also mapped from lease `status: "fallback"` (cross-SDK note: Swift and Rust surface a distinct `Limited` state; C# maps it to `Expired`). |
 | `Invalid` | No valid lease and no trial in progress. |
 
 ```csharp
