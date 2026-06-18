@@ -4,9 +4,11 @@ using UnityEngine;
 namespace Keylight.Unity {
   /// <summary>
   /// Convenience factory that wires up a <see cref="KeylightClient"/> for
-  /// Unity: uses <see cref="UnityLeaseStore"/> for persistence and injects
-  /// <c>Application.platform.ToString()</c> as the <c>platform</c> field
-  /// sent in activate/validate requests.
+  /// Unity: uses <see cref="UnityLeaseStore"/> for persistence, stamps
+  /// <c>Application.platform.ToString()</c> as the <c>platform</c> field,
+  /// and uses <see cref="UnityWebRequestTransport"/> so the package works
+  /// on all Unity platforms — including <strong>WebGL</strong>, where
+  /// <c>HttpClient</c> is unavailable.
   ///
   /// Usage (MonoBehaviour):
   /// <code>
@@ -22,10 +24,10 @@ namespace Keylight.Unity {
     /// Creates a fully configured <see cref="KeylightClient"/> using:
     /// <list type="bullet">
     ///   <item><see cref="UnityLeaseStore"/> backed by <c>Application.persistentDataPath</c></item>
-    ///   <item>Default <see cref="HttpClientTransport"/> pointing at api.keylight.dev</item>
+    ///   <item><see cref="UnityWebRequestTransport"/> — works on ALL platforms including WebGL</item>
     /// </list>
     /// The <c>platform</c> string sent to the server is set to
-    /// <c>Application.platform.ToString()</c> (e.g. "WindowsPlayer", "IPhonePlayer").
+    /// <c>Application.platform.ToString()</c> (e.g. "WindowsPlayer", "IPhonePlayer", "WebGLPlayer").
     /// </summary>
     /// <param name="config">A fully built <see cref="KeylightConfig"/>.</param>
     /// <param name="leaseFilename">
@@ -35,26 +37,24 @@ namespace Keylight.Unity {
       KeylightConfig config,
       string leaseFilename = "keylight-lease.json") {
 
-      // Override the static Device.Platform with the Unity runtime platform.
-      // We do this by supplying a custom transport that stamps the platform
-      // on every request via a thin wrapper.
-      var store = new UnityLeaseStore(leaseFilename);
-      var platform = Application.platform.ToString();
+      var store     = new UnityLeaseStore(leaseFilename);
+      var platform  = Application.platform.ToString();
       var transport = new UnityPlatformTransport(config, platform);
       return new KeylightClient(config, store, transport);
     }
   }
 
   /// <summary>
-  /// Internal transport wrapper that overrides the <c>platform</c> field
-  /// in outbound activate/validate requests with the Unity runtime platform string.
+  /// Internal transport that wraps <see cref="UnityWebRequestTransport"/> and
+  /// stamps the Unity runtime platform string onto every outbound
+  /// activate/validate request.
   /// </summary>
   internal sealed class UnityPlatformTransport : IKeylightTransport {
-    private readonly HttpClientTransport _inner;
+    private readonly UnityWebRequestTransport _inner;
     private readonly string _platform;
 
     internal UnityPlatformTransport(KeylightConfig config, string platform) {
-      _inner = new HttpClientTransport(
+      _inner = new UnityWebRequestTransport(
         config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       _platform = platform;
     }
