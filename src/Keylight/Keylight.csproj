@@ -11,6 +11,7 @@
     <Authors>Keylight</Authors>
     <Description>Offline-first software licensing for .NET, Godot, and Unity — signed Ed25519 leases, device activations, entitlements.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://keylight.dev</PackageProjectUrl>
     <RepositoryUrl>https://github.com/keylight-dev/keylight-csharp</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -19,5 +20,8 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
