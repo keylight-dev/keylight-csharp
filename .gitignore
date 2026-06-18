@@ -5,3 +5,6 @@ artifacts/
 .vs/
 *.suo
 .DS_Store
+samples/**/bin/
+samples/**/obj/
+samples/**/.godot/
