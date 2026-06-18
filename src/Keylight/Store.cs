@@ -104,7 +104,7 @@ namespace Keylight {
         first = false;
         sb.Append("\"instanceId\":");
         sb.Append('"');
-        AppendEscaped(sb, state.InstanceId);
+        JsonCodec.WriteEscapedString(sb, state.InstanceId);
         sb.Append('"');
       }
 
@@ -140,28 +140,6 @@ namespace Keylight {
         : null;
 
       return state;
-    }
-
-    private static void AppendEscaped(System.Text.StringBuilder sb, string s) {
-      foreach (var c in s) {
-        switch (c) {
-          case '"':  sb.Append("\\\""); break;
-          case '\\': sb.Append("\\\\"); break;
-          case '\b': sb.Append("\\b");  break;
-          case '\f': sb.Append("\\f");  break;
-          case '\n': sb.Append("\\n");  break;
-          case '\r': sb.Append("\\r");  break;
-          case '\t': sb.Append("\\t");  break;
-          default:
-            if (c < 0x20) {
-              sb.Append("\\u");
-              sb.Append(((int)c).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
-            } else {
-              sb.Append(c);
-            }
-            break;
-        }
-      }
     }
   }
 }

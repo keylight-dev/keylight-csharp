@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Keylight.Json;
 
 namespace Keylight {
@@ -138,8 +139,8 @@ namespace Keylight {
         ["kid"]            = JsonValue.MakeString(lease.Kid),
         ["licenseKeyHash"] = JsonValue.MakeString(lease.LicenseKeyHash),
         ["instanceId"]     = JsonValue.MakeString(lease.InstanceId),
-        ["issuedAt"]       = JsonValue.MakeNumber(lease.IssuedAt.ToString()),
-        ["expiresAt"]      = JsonValue.MakeNumber(lease.ExpiresAt.ToString()),
+        ["issuedAt"]       = JsonValue.MakeNumber(lease.IssuedAt.ToString(CultureInfo.InvariantCulture)),
+        ["expiresAt"]      = JsonValue.MakeNumber(lease.ExpiresAt.ToString(CultureInfo.InvariantCulture)),
         ["status"]         = JsonValue.MakeString(lease.Status),
         ["entitlements"]   = JsonValue.MakeArray(entsArr),
         ["signature"]      = JsonValue.MakeString(lease.Signature)

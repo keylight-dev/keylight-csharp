@@ -101,7 +101,7 @@ namespace Keylight.Json {
       }
     }
 
-    private static void WriteEscapedString(StringBuilder sb, string s) {
+    internal static void WriteEscapedString(StringBuilder sb, string s) {
       foreach (var c in s) {
         switch (c) {
           case '"':  sb.Append("\\\""); break;
