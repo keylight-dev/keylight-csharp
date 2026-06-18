@@ -22,4 +22,8 @@
     <ProjectReference Include="..\..\src\Keylight\Keylight.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="conformance/vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
