@@ -213,17 +213,19 @@ namespace Keylight {
 
     // ─── public API — sync wrappers ──────────────────────────────────────────
 
+    // Deadlock-safe because every await in the async path uses ConfigureAwait(false).
+
     /// <summary>Synchronous wrapper for <see cref="ActivateAsync"/>.</summary>
     public void Activate(string licenseKey)
-      => ActivateAsync(licenseKey).ConfigureAwait(false).GetAwaiter().GetResult();
+      => ActivateAsync(licenseKey).GetAwaiter().GetResult();
 
     /// <summary>Synchronous wrapper for <see cref="ValidateAsync"/>.</summary>
     public void Validate()
-      => ValidateAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+      => ValidateAsync().GetAwaiter().GetResult();
 
     /// <summary>Synchronous wrapper for <see cref="DeactivateAsync"/>.</summary>
     public void Deactivate()
-      => DeactivateAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+      => DeactivateAsync().GetAwaiter().GetResult();
 
     // ─── private helpers ─────────────────────────────────────────────────────
 
