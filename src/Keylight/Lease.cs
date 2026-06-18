@@ -1,17 +1,16 @@
 using System;
 using System.Linq;
-using System.Text.Json.Serialization;
 
 namespace Keylight {
   public sealed class Lease {
-    [JsonPropertyName("kid")] public string Kid { get; set; } = "";
-    [JsonPropertyName("licenseKeyHash")] public string LicenseKeyHash { get; set; } = "";
-    [JsonPropertyName("instanceId")] public string InstanceId { get; set; } = "";
-    [JsonPropertyName("issuedAt")] public long IssuedAt { get; set; }
-    [JsonPropertyName("expiresAt")] public long ExpiresAt { get; set; }
-    [JsonPropertyName("status")] public string Status { get; set; } = "";
-    [JsonPropertyName("entitlements")] public string[] Entitlements { get; set; } = Array.Empty<string>();
-    [JsonPropertyName("signature")] public string Signature { get; set; } = "";
+    public string Kid { get; set; } = "";
+    public string LicenseKeyHash { get; set; } = "";
+    public string InstanceId { get; set; } = "";
+    public long IssuedAt { get; set; }
+    public long ExpiresAt { get; set; }
+    public string Status { get; set; } = "";
+    public string[] Entitlements { get; set; } = Array.Empty<string>();
+    public string Signature { get; set; } = "";
   }
 
   public static class LeasePayload {

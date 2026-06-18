@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Keylight.Json;
 
 namespace Keylight {
   /// <summary>
@@ -32,39 +32,33 @@ namespace Keylight {
     public static Keyset? Parse(string json) {
       if (string.IsNullOrEmpty(json)) return null;
       try {
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        var root = JsonCodec.Parse(json);
+        if (root == null) return null;
 
         // primary_kid must be a string
-        if (!root.TryGetProperty("primary_kid", out var primaryKidEl) ||
-            primaryKidEl.ValueKind != JsonValueKind.String) {
-          return null;
-        }
-        var primaryKid = primaryKidEl.GetString();
+        var primaryKidVal = root.Get("primary_kid");
+        if (primaryKidVal == null || primaryKidVal.IsNull) return null;
+        var primaryKid = primaryKidVal.AsString();
         if (primaryKid == null) return null;
 
         // keys must be an array
-        if (!root.TryGetProperty("keys", out var keysEl) ||
-            keysEl.ValueKind != JsonValueKind.Array) {
-          return null;
-        }
+        var keysVal = root.Get("keys");
+        if (keysVal == null || keysVal.IsNull) return null;
+        var keysArr = keysVal.AsArray();
+        if (keysArr == null) return null;
 
         var keys = new Dictionary<string, string>();
-        foreach (var entry in keysEl.EnumerateArray()) {
+        foreach (var entry in keysArr) {
           // kid must be a string
-          if (!entry.TryGetProperty("kid", out var kidEl) ||
-              kidEl.ValueKind != JsonValueKind.String) {
-            return null;
-          }
-          var kid = kidEl.GetString();
+          var kidVal = entry.Get("kid");
+          if (kidVal == null || kidVal.IsNull) return null;
+          var kid = kidVal.AsString();
           if (kid == null) return null;
 
           // public_key must be a string
-          if (!entry.TryGetProperty("public_key", out var pkEl) ||
-              pkEl.ValueKind != JsonValueKind.String) {
-            return null;
-          }
-          var publicKey = pkEl.GetString();
+          var pkVal = entry.Get("public_key");
+          if (pkVal == null || pkVal.IsNull) return null;
+          var publicKey = pkVal.AsString();
           if (publicKey == null) return null;
 
           keys[kid] = publicKey;

@@ -1,8 +1,6 @@
 using System;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,11 +17,6 @@ namespace Keylight {
   /// URL pattern: <c>{baseUrl}/{tenantId}/{productId}/{action}</c>.
   /// </summary>
   public sealed class HttpClientTransport : IKeylightTransport {
-    // Exposed for tests so they serialize with the same options.
-    public static readonly JsonSerializerOptions SerializerOptions = new JsonSerializerOptions {
-      DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     private readonly string _baseUrl;
     private readonly string _tenantId;
     private readonly string _productId;
@@ -48,9 +41,8 @@ namespace Keylight {
     private string BuildUrl(string action) =>
       $"{_baseUrl}/{_tenantId}/{_productId}/{action}";
 
-    private HttpRequestMessage BuildRequest<T>(string action, T body) {
-      var json = JsonSerializer.Serialize(body, SerializerOptions);
-      var content = new StringContent(json, Encoding.UTF8, "application/json");
+    private HttpRequestMessage BuildRequest(string action, string jsonBody) {
+      var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
       var request = new HttpRequestMessage(HttpMethod.Post, BuildUrl(action)) {
         Content = content
       };
@@ -58,32 +50,35 @@ namespace Keylight {
       return request;
     }
 
-    private static async Task<TResponse> ReadResponse<TResponse>(HttpResponseMessage response, CancellationToken ct) {
+    private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct) {
       response.EnsureSuccessStatusCode();
 #if NETSTANDARD2_0
-      var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+      return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 #else
-      var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+      return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 #endif
-      var result = JsonSerializer.Deserialize<TResponse>(body, SerializerOptions);
+    }
+
+    public async Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default) {
+      using var request = BuildRequest("activate", req.ToJson());
+      var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+      var body = await ReadBodyAsync(response, ct).ConfigureAwait(false);
+      var result = ActivateResponse.Parse(body);
       if (result == null) throw new InvalidOperationException("Empty or null response from Keylight API.");
       return result;
     }
 
-    public async Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default) {
-      using var request = BuildRequest("activate", req);
-      var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-      return await ReadResponse<ActivateResponse>(response, ct).ConfigureAwait(false);
-    }
-
     public async Task<ValidateResponse> ValidateAsync(ValidateRequest req, CancellationToken ct = default) {
-      using var request = BuildRequest("validate", req);
+      using var request = BuildRequest("validate", req.ToJson());
       var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-      return await ReadResponse<ValidateResponse>(response, ct).ConfigureAwait(false);
+      var body = await ReadBodyAsync(response, ct).ConfigureAwait(false);
+      var result = ValidateResponse.Parse(body);
+      if (result == null) throw new InvalidOperationException("Empty or null response from Keylight API.");
+      return result;
     }
 
     public async Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default) {
-      using var request = BuildRequest("deactivate", req);
+      using var request = BuildRequest("deactivate", req.ToJson());
       var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
     }

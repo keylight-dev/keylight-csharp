@@ -1,21 +1,21 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Keylight.Json;
 
 namespace Keylight {
   /// <summary>Cached lease state persisted between process runs.</summary>
   public sealed class CachedState {
-    [JsonPropertyName("lease")]          public Lease?  Lease          { get; set; }
-    [JsonPropertyName("instanceId")]     public string? InstanceId     { get; set; }
-    [JsonPropertyName("fetchedAt")]      public long    FetchedAt      { get; set; }
+    public Lease?  Lease          { get; set; }
+    public string? InstanceId     { get; set; }
+    public long    FetchedAt      { get; set; }
     /// <summary>
     /// Unix-second timestamp of when the trial was started on this device.
     /// Null until the first <see cref="KeylightClient.CheckOnLaunchAsync"/> call
     /// on a fresh install with <c>TrialDurationDays</c> configured.
     /// Once set it is never reset (idempotent trial start).
     /// </summary>
-    [JsonPropertyName("trialStartedAt")] public long?   TrialStartedAt { get; set; }
+    public long?   TrialStartedAt { get; set; }
   }
 
   /// <summary>Pluggable storage backend for the cached lease state.</summary>
@@ -36,10 +36,6 @@ namespace Keylight {
   public sealed class FileLeaseStore : ILeaseStore {
     private readonly string _filePath;
 
-    private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions {
-      PropertyNameCaseInsensitive = true
-    };
-
     public FileLeaseStore(string? directory = null) {
       var dir = directory
         ?? Path.Combine(
@@ -53,9 +49,8 @@ namespace Keylight {
       if (!File.Exists(_filePath)) return null;
       try {
         var raw = File.ReadAllText(_filePath);
-        return JsonSerializer.Deserialize<CachedState>(raw, _jsonOptions);
+        return DeserializeCachedState(raw);
       } catch {
-        // Missing or corrupt file — treat as empty.
         return null;
       }
     }
@@ -65,7 +60,7 @@ namespace Keylight {
       var dir = Path.GetDirectoryName(_filePath);
       if (dir != null && !Directory.Exists(dir))
         Directory.CreateDirectory(dir);
-      var json = JsonSerializer.Serialize(state, _jsonOptions);
+      var json = SerializeCachedState(state);
       File.WriteAllText(_filePath, json);
     }
 
@@ -73,6 +68,100 @@ namespace Keylight {
     public void Clear() {
       if (File.Exists(_filePath))
         File.Delete(_filePath);
+    }
+
+    // -------------------------------------------------------------------
+    // Serialization helpers (internal, zero external dependency)
+    // -------------------------------------------------------------------
+
+    internal static string SerializeCachedState(CachedState state) {
+      var obj = new Dictionary<string, object?> {
+        ["instanceId"] = state.InstanceId,
+        ["fetchedAt"]  = (object?)state.FetchedAt
+      };
+      if (state.TrialStartedAt.HasValue)
+        obj["trialStartedAt"] = (object?)state.TrialStartedAt.Value;
+
+      // Lease is serialized as a sub-object using WireHelpers
+      // We build the JSON string manually to include the lease sub-object
+      var sb = new System.Text.StringBuilder();
+      sb.Append('{');
+
+      bool first = true;
+
+      // lease (nullable)
+      if (state.Lease != null) {
+        if (!first) sb.Append(',');
+        first = false;
+        sb.Append("\"lease\":");
+        var leaseVal = WireHelpers.LeaseToJsonValue(state.Lease);
+        sb.Append(JsonCodec.StringifyValue(leaseVal));
+      }
+
+      // instanceId (nullable string)
+      if (state.InstanceId != null) {
+        if (!first) sb.Append(',');
+        first = false;
+        sb.Append("\"instanceId\":");
+        sb.Append('"');
+        AppendEscaped(sb, state.InstanceId);
+        sb.Append('"');
+      }
+
+      // fetchedAt (long)
+      if (!first) sb.Append(',');
+      sb.Append("\"fetchedAt\":");
+      sb.Append(state.FetchedAt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+      // trialStartedAt (nullable long)
+      if (state.TrialStartedAt.HasValue) {
+        sb.Append(",\"trialStartedAt\":");
+        sb.Append(state.TrialStartedAt.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      }
+
+      sb.Append('}');
+      return sb.ToString();
+    }
+
+    internal static CachedState? DeserializeCachedState(string json) {
+      var root = JsonCodec.Parse(json);
+      if (root == null) return null;
+
+      var state = new CachedState();
+      state.InstanceId = root.Get("instanceId")?.AsString();
+      state.FetchedAt  = root.Get("fetchedAt")?.AsLong() ?? 0;
+
+      var trialNode = root.Get("trialStartedAt");
+      state.TrialStartedAt = (trialNode != null && !trialNode.IsNull) ? trialNode.AsLong() : null;
+
+      var leaseNode = root.Get("lease");
+      state.Lease = (leaseNode != null && !leaseNode.IsNull)
+        ? WireHelpers.ParseLease(leaseNode)
+        : null;
+
+      return state;
+    }
+
+    private static void AppendEscaped(System.Text.StringBuilder sb, string s) {
+      foreach (var c in s) {
+        switch (c) {
+          case '"':  sb.Append("\\\""); break;
+          case '\\': sb.Append("\\\\"); break;
+          case '\b': sb.Append("\\b");  break;
+          case '\f': sb.Append("\\f");  break;
+          case '\n': sb.Append("\\n");  break;
+          case '\r': sb.Append("\\r");  break;
+          case '\t': sb.Append("\\t");  break;
+          default:
+            if (c < 0x20) {
+              sb.Append("\\u");
+              sb.Append(((int)c).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
+            } else {
+              sb.Append(c);
+            }
+            break;
+        }
+      }
     }
   }
 }

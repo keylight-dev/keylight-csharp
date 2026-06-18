@@ -1,9 +1,12 @@
-using System.Text.Json;
 using Keylight;
 using Xunit;
 
+/// <summary>
+/// Tests for request serialization and response parsing via the internal wire codec.
+/// System.Text.Json is intentionally NOT used here — these tests exercise the
+/// zero-dependency JsonCodec that ships in the core (Unity IL2CPP safe).
+/// </summary>
 public class TransportTests {
-  private static readonly JsonSerializerOptions Options = HttpClientTransport.SerializerOptions;
 
   [Fact]
   public void ActivateRequest_serializes_snake_case_fields() {
@@ -15,7 +18,7 @@ public class TransportTests {
       Platform = "macOS"
     };
 
-    var json = JsonSerializer.Serialize(req, Options);
+    var json = req.ToJson();
 
     Assert.Contains("\"license_key\":\"K\"", json);
     Assert.Contains("\"instance_name\":\"Mac\"", json);
@@ -31,7 +34,7 @@ public class TransportTests {
       InstanceName = "Mac"
     };
 
-    var json = JsonSerializer.Serialize(req, Options);
+    var json = req.ToJson();
 
     Assert.DoesNotContain("free_tier_instance_id", json);
   }
@@ -44,7 +47,7 @@ public class TransportTests {
       FreeTierInstanceId = "ft-123"
     };
 
-    var json = JsonSerializer.Serialize(req, Options);
+    var json = req.ToJson();
 
     Assert.Contains("\"free_tier_instance_id\":\"ft-123\"", json);
   }
@@ -55,7 +58,7 @@ public class TransportTests {
       InstanceId = "inst-abc"
     };
 
-    var json = JsonSerializer.Serialize(req, Options);
+    var json = req.ToJson();
 
     Assert.Contains("\"instance_id\":\"inst-abc\"", json);
     Assert.DoesNotContain("app_version", json);
@@ -69,7 +72,7 @@ public class TransportTests {
       InstanceId = "inst-xyz"
     };
 
-    var json = JsonSerializer.Serialize(req, Options);
+    var json = req.ToJson();
 
     Assert.Contains("\"instance_id\":\"inst-xyz\"", json);
   }
@@ -77,7 +80,7 @@ public class TransportTests {
   [Fact]
   public void ActivateResponse_deserializes_activated_and_instance_id() {
     var json = "{\"activated\":true,\"instance_id\":\"id-1\",\"license_expires_at\":null}";
-    var resp = JsonSerializer.Deserialize<ActivateResponse>(json, Options);
+    var resp = ActivateResponse.Parse(json);
 
     Assert.NotNull(resp);
     Assert.True(resp!.Activated);
@@ -88,7 +91,7 @@ public class TransportTests {
   [Fact]
   public void ActivateResponse_deserializes_lease() {
     var json = "{\"activated\":true,\"instance_id\":\"id-1\",\"license_expires_at\":1234567890,\"lease\":{\"kid\":\"k1\",\"licenseKeyHash\":\"h\",\"instanceId\":\"id-1\",\"issuedAt\":100,\"expiresAt\":200,\"status\":\"active\",\"entitlements\":[\"pro\"],\"signature\":\"sig\"}}";
-    var resp = JsonSerializer.Deserialize<ActivateResponse>(json, Options);
+    var resp = ActivateResponse.Parse(json);
 
     Assert.NotNull(resp);
     Assert.NotNull(resp!.Lease);
@@ -99,7 +102,7 @@ public class TransportTests {
   [Fact]
   public void ValidateResponse_deserializes_valid_and_lease() {
     var json = "{\"valid\":false,\"license_expires_at\":null}";
-    var resp = JsonSerializer.Deserialize<ValidateResponse>(json, Options);
+    var resp = ValidateResponse.Parse(json);
 
     Assert.NotNull(resp);
     Assert.False(resp!.Valid);
