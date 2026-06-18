@@ -106,7 +106,7 @@ namespace Keylight {
         InstanceName = Device.DefaultInstanceName(),
         AppVersion   = _config.AppVersion,
         SdkVersion   = SdkInfo.Version,
-        Platform     = Device.Platform
+        Platform     = _config.Platform ?? Device.Platform
       };
 
       ActivateResponse resp;
@@ -146,7 +146,7 @@ namespace Keylight {
         InstanceId = instanceId,
         AppVersion = _config.AppVersion,
         SdkVersion = SdkInfo.Version,
-        Platform   = Device.Platform
+        Platform   = _config.Platform ?? Device.Platform
       };
 
       ValidateResponse resp;
