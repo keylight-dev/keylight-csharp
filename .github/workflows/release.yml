@@ -1,0 +1,57 @@
+name: Release
+
+# Publishes the Keylight NuGet package via OIDC trusted publishing — no long-lived
+# API key is stored in the repo. Triggered by pushing a `v*` tag (e.g. `v0.1.0`),
+# or run manually from the Actions tab once the trusted-publishing policy is live.
+#
+# One-time setup on nuget.org (account → Trusted Publishing → add policy):
+#   Repository Owner: keylight-dev
+#   Repository:       keylight-csharp
+#   Workflow File:    release.yml
+# Then add a repo secret NUGET_USER = your nuget.org profile name (NOT your email).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for the GitHub OIDC token NuGet exchanges for a temp key
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test — conformance gate (8/8 cross-SDK vectors)
+        run: dotnet test --configuration Release --no-build
+
+      - name: Pack
+        run: dotnet pack src/Keylight/Keylight.csproj --configuration Release --no-build -o ${{ runner.temp }}/nupkg
+
+      - name: NuGet login (OIDC → short-lived API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push package + symbols to nuget.org
+        run: >
+          dotnet nuget push "${{ runner.temp }}/nupkg/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
