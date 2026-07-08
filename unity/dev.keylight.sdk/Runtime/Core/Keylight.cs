@@ -140,9 +140,23 @@ namespace Keylight {
       ValidateResponse resp;
       try {
         resp = await _transport.ValidateAsync(req, ct).ConfigureAwait(false);
+      } catch (ActivationException ex) when (ex.StatusCode == 422 && ex.Body != null) {
+        // The worker's definitive-rejection shape (revoked license, deactivated/
+        // unknown instance) comes back as HTTP 422 with a JSON body and no
+        // top-level `valid` field — the transport surfaces that as a thrown
+        // ActivationException rather than a parsed ValidateResponse. Treat it as
+        // a decodable response (mirrors the JS SDK's `decodable4xx` handling of
+        // /validate's 422) instead of a transport failure, so the lease-present /
+        // no-lease logic below actually runs for a real revoke instead of hitting
+        // the network no-op path and keeping a stale lease.
+        var decoded = ValidateResponse.Parse(ex.Body);
+        if (decoded == null) return; // Undecodable body: fail safe, keep last-known-good.
+        resp = decoded;
       } catch {
-        // Network failures are non-fatal for validate — the client stays in
-        // whatever state the cache dictates.
+        // Genuine transport/network failures (no HTTP response at all — timeout,
+        // DNS failure, connection refused, and non-422 server errors like 429/5xx)
+        // are the ONLY no-op path — the client stays in whatever state the cache
+        // dictates (last-known-good).
         return;
       }
 
@@ -150,12 +164,32 @@ namespace Keylight {
         // Verify-or-reject before persisting the updated lease
         VerifyOrReject(resp.Lease);
         var newState = new CachedState {
-          Lease      = resp.Lease,
-          InstanceId = cached?.InstanceId,
-          FetchedAt  = _nowSeconds()
+          Lease          = resp.Lease,
+          InstanceId     = cached?.InstanceId,
+          FetchedAt      = _nowSeconds(),
+          TrialStartedAt = cached?.TrialStartedAt
+        };
+        _store.Save(newState);
+      } else if (!resp.Valid) {
+        // Definitive rejection with no lease (revoked / deactivated instance /
+        // unknown license): the server responded but refused to vouch for us.
+        // This must NOT be treated as a no-op — previously `resp.Valid` was
+        // parsed but never read, so a revoked license kept being trusted until
+        // its cached lease's own ExpiresAt. Clear the trusted lease so the next
+        // State/HasEntitlement read resolves to Invalid (or, if a trial is
+        // configured and still running, falls back to Trial — mirroring the same
+        // precedence DeactivateAsync already uses).
+        var newState = new CachedState {
+          Lease          = null,
+          InstanceId     = cached?.InstanceId,
+          FetchedAt      = _nowSeconds(),
+          TrialStartedAt = cached?.TrialStartedAt
         };
         _store.Save(newState);
       }
+      // resp.Valid == true && resp.Lease == null: the server confirmed validity
+      // without sending a refreshed lease. Nothing to persist — the existing
+      // cached lease remains authoritative.
     }
 
     /// <summary>
@@ -202,16 +236,20 @@ namespace Keylight {
     }
 
     /// <summary>
-    /// Called on app launch: refreshes the lease if a license is stored and
-    /// the cached lease is stale or near expiry. Also auto-starts the trial
-    /// (persists <c>TrialStartedAt</c>) on the first launch when
+    /// Called on app launch: always performs a server <see cref="ValidateAsync"/>
+    /// round-trip (unlike <see cref="RefreshIfNeededAsync"/>, this is never
+    /// skipped for staleness reasons) so a dashboard revoke or expiry takes
+    /// effect on the very next launch instead of lagging behind the in-session
+    /// refresh cadence. A transient/thrown validate failure leaves the cached
+    /// state untouched (see <see cref="ValidateAsync"/>). Also auto-starts the
+    /// trial (persists <c>TrialStartedAt</c>) on the first launch when
     /// <see cref="KeylightConfig.TrialDurationDays"/> is configured and no
     /// trusted active license is present.
     /// </summary>
     public async Task CheckOnLaunchAsync(CancellationToken ct = default) {
       var cached = _store.Load();
       if (cached != null)
-        await RefreshIfNeededAsync(ct).ConfigureAwait(false);
+        await ValidateAsync(ct).ConfigureAwait(false);
 
       // Auto-start trial: once, idempotent, only when no trusted active license
       // and TrialDurationDays is configured.
@@ -281,9 +319,18 @@ namespace Keylight {
       // Trusted lease: resolve by status
       switch (rawLease.Status) {
         case "active":
-          if (!r.Expired) return KeylightState.Licensed;
-          // Stale active lease: fall through to Expired
-          return KeylightState.Expired;
+          if (r.Expired) return KeylightState.Expired;
+          // Bound offline use: a signed lease can outlive MaxOfflineDays of
+          // no successful server contact. Once that cap is exceeded, State
+          // must stop reporting Licensed even though the cached lease itself
+          // hasn't expired yet — mirrors the gate GetCachedTrustedLease
+          // already applies to HasEntitlement. MaxOfflineDays <= 0 disables
+          // the cap (air-gapped consumers).
+          if (_config.MaxOfflineDays > 0) {
+            var offlineSeconds = _nowSeconds() - _store.Load()!.FetchedAt;
+            if (offlineSeconds > (long)_config.MaxOfflineDays * 86400) return KeylightState.Expired;
+          }
+          return KeylightState.Licensed;
         case "expired":
           return KeylightState.Expired;
         case "fallback":

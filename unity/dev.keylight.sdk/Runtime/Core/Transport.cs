@@ -39,7 +39,7 @@ namespace Keylight {
     }
 
     private string BuildUrl(string action) =>
-      $"{_baseUrl}/{_tenantId}/{_productId}/{action}";
+      TransportHelpers.BuildUrl(_baseUrl, _tenantId, _productId, action);
 
     private HttpRequestMessage BuildRequest(string action, string jsonBody) {
       var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
@@ -51,12 +51,13 @@ namespace Keylight {
     }
 
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct) {
-      response.EnsureSuccessStatusCode();
 #if NETSTANDARD2_0
-      return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+      var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 #else
-      return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+      var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 #endif
+      TransportHelpers.EnsureSuccess((int)response.StatusCode, body);
+      return body;
     }
 
     public async Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default) {
@@ -80,11 +81,23 @@ namespace Keylight {
     public async Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default) {
       using var request = BuildRequest("deactivate", req.ToJson());
       var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
+      await ReadBodyAsync(response, ct).ConfigureAwait(false);
     }
 
     public void Dispose() {
       if (_ownsClient) _http.Dispose();
+    }
+  }
+
+  /// <summary>Shared transport helpers used by both HttpClientTransport and UnityWebRequestTransport.</summary>
+  internal static class TransportHelpers {
+    internal static string BuildUrl(string baseUrl, string tenantId, string productId, string action) =>
+      $"{baseUrl}/{tenantId}/{productId}/{action}";
+
+    internal static void EnsureSuccess(int statusCode, string body) {
+      if (statusCode < 200 || statusCode >= 300)
+        throw new ActivationException(statusCode,
+          $"Keylight API returned HTTP {statusCode}: {body}", body);
     }
   }
 }

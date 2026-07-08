@@ -43,7 +43,7 @@ namespace Keylight {
       private readonly string _productId;
       private readonly string _sdkKey;
       private IReadOnlyDictionary<string, string> _trustedKeys = new Dictionary<string, string>();
-      private int _maxOfflineDays = 7;
+      private int _maxOfflineDays = 15;
       private string? _keyPrefix;
       private int? _trialDurationDays;
       private string _baseUrl = "https://api.keylight.dev";

@@ -93,7 +93,7 @@ var keyset = await Keyset.FetchAsync(http, "https://api.keylight.dev", "your-ten
 var config = KeylightConfig
     .Builder("your-tenant", "your-product", "sdk_live_…")
     .TrustedKeys(keyset?.Keys ?? new Dictionary<string, string>())
-    .MaxOfflineDays(7)   // optional offline grace window
+    .MaxOfflineDays(15)  // optional offline grace window (15 is the default)
     .Build();
 
 var client = new KeylightClient(config);
@@ -196,7 +196,7 @@ var config = KeylightConfig
     {
         { "k1", "<raw Ed25519 public key, base64>" }
     })
-    .MaxOfflineDays(7)  // omit to run offline as long as the lease itself is current
+    .MaxOfflineDays(15)  // default; omit to run offline as long as the lease itself is current
     .Build();
 ```
 
@@ -241,7 +241,7 @@ Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
 |----------------|------|---------|-------------|
 | _(required)_ `Builder(tenantId, productId, sdkKey)` | `string` | — | Your Keylight tenant, product, and SDK key. All three are required. |
 | `.TrustedKeys(dict)` | `IDictionary<string,string>` | empty | Trusted Ed25519 public keys (`kid → base64`) for offline verification. |
-| `.MaxOfflineDays(n)` | `int` | `7` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
+| `.MaxOfflineDays(n)` | `int` | `15` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
 | `.TrialDurationDays(n)` | `int` | — | Local trial length in days. Omit to disable trials. |
 | `.AppVersion(v)` | `string` | — | Reported in activation/validation telemetry. |
 | `.KeyPrefix(p)` | `string` | — | Client-side key-format check (e.g. `"PROD"`). |
