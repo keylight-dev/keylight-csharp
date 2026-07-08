@@ -5,6 +5,21 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-07-08
+
+### Fixed
+
+- **Revocation now enforced on launch.** `CheckOnLaunchAsync` always performs a server
+  validate, so a dashboard revoke/expiry lands on the next launch. A real HTTP 422 revoke
+  response is now decoded and reconciled (clearing the stale cached lease) instead of being
+  swallowed as a transient failure, and a `Valid == false` rejection with no lease clears
+  the cached lease.
+- **Offline use bounded by `MaxOfflineDays`.** A signed lease can no longer outlive the
+  offline cap; `ResolveState` now applies the same bound the entitlement gate already used.
+- **Unity mirror brought to parity** (`dev.keylight.sdk` 0.1.1). The hand-maintained Unity
+  copy still carried the pre-fix logic and would have shipped unpatched; its `MaxOfflineDays`
+  default also moves 7 → 15 to match the NuGet SDK.
+
 ## [0.1.0] — 2026-06-18
 
 Initial release of the Keylight C# SDK.
