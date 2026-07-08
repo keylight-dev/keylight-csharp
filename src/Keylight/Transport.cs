@@ -97,7 +97,7 @@ namespace Keylight {
     internal static void EnsureSuccess(int statusCode, string body) {
       if (statusCode < 200 || statusCode >= 300)
         throw new ActivationException(statusCode,
-          $"Keylight API returned HTTP {statusCode}: {body}");
+          $"Keylight API returned HTTP {statusCode}: {body}", body);
     }
   }
 }

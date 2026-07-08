@@ -157,9 +157,23 @@ namespace Keylight {
       ValidateResponse resp;
       try {
         resp = await _transport.ValidateAsync(req, ct).ConfigureAwait(false);
+      } catch (ActivationException ex) when (ex.StatusCode == 422 && ex.Body != null) {
+        // The worker's definitive-rejection shape (revoked license, deactivated/
+        // unknown instance) comes back as HTTP 422 with a JSON body and no
+        // top-level `valid` field — HttpClientTransport surfaces that as a
+        // thrown ActivationException rather than a parsed ValidateResponse.
+        // Treat it as a decodable response (mirrors the JS SDK's `decodable4xx`
+        // handling of /validate's 422) instead of a transport failure, so the
+        // lease-present / no-lease logic below actually runs for a real revoke
+        // instead of hitting the network no-op path and keeping a stale lease.
+        var decoded = ValidateResponse.Parse(ex.Body);
+        if (decoded == null) return; // Undecodable body: fail safe, keep last-known-good.
+        resp = decoded;
       } catch {
-        // Transport/network failures are the ONLY no-op path — the client
-        // stays in whatever state the cache dictates (last-known-good).
+        // Genuine transport/network failures (no HTTP response at all — timeout,
+        // DNS failure, connection refused, and non-422 server errors like 429/5xx)
+        // are the ONLY no-op path — the client stays in whatever state the cache
+        // dictates (last-known-good).
         return;
       }
 

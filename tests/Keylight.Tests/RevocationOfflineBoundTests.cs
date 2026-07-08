@@ -186,6 +186,113 @@ namespace Keylight.Tests {
       Assert.Equal(KeylightState.Licensed, client.State);
     }
 
+    // ─── (f) real worker 422 revoke shape actually clears the lease ────────
+    //
+    // RevokedTransport above returns a *parsed* ValidateResponse{Valid=false},
+    // which never exercises the real bug: HttpClientTransport.ValidateAsync
+    // throws ActivationException for ANY non-2xx status (including 422) before
+    // Keylight.cs ever sees a ValidateResponse. The real worker's revoke /
+    // deactivated-instance response is HTTP 422, body `{"error":"..."}`, no
+    // lease, no top-level "valid" field — which used to land in the generic
+    // `catch { return; }` no-op path and leave a revoked license "Licensed"
+    // until its own (still-valid) lease expired on its own schedule.
+
+    // A transport that throws the exact shape HttpClientTransport surfaces for
+    // a real 422 revoke: ActivationException(422, ..., body) with no lease and
+    // no "valid" field in the body.
+    private class Real422RevokedTransport : IKeylightTransport {
+      public int ValidateCalls;
+      public Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default)
+        => throw new NotSupportedException();
+      public Task<ValidateResponse> ValidateAsync(ValidateRequest req, CancellationToken ct = default) {
+        ValidateCalls++;
+        const string body = "{\"error\":\"Instance not found or deactivated\"}";
+        throw new ActivationException(422, $"Keylight API returned HTTP 422: {body}", body);
+      }
+      public Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default)
+        => Task.CompletedTask;
+    }
+
+    // A transport that throws the same real 422 shape but WITH a lease attached
+    // (status "expired") — the worker still vouches for a lease, just a lesser
+    // one. This must be kept, not cleared: State resolves to Expired off the
+    // returned lease rather than Invalid.
+    private class Real422ExpiredLeaseTransport : IKeylightTransport {
+      public int ValidateCalls;
+      private readonly Lease _lease;
+      public Real422ExpiredLeaseTransport(Lease lease) { _lease = lease; }
+      public Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default)
+        => throw new NotSupportedException();
+      public Task<ValidateResponse> ValidateAsync(ValidateRequest req, CancellationToken ct = default) {
+        ValidateCalls++;
+        var leaseJson = Keylight.Json.JsonCodec.StringifyValue(WireHelpers.LeaseToJsonValue(_lease));
+        var body = $"{{\"error\":\"expired\",\"lease\":{leaseJson}}}";
+        throw new ActivationException(422, $"Keylight API returned HTTP 422: {body}", body);
+      }
+      public Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default)
+        => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task ValidateAsync_real_422_revoke_with_no_lease_clears_stale_lease() {
+      var (lease, trustedKeys, now) = Vectors.Get("valid-active");
+      var config = ClientHelper.MakeConfig(trustedKeys);
+      var store = new MemoryLeaseStore();
+      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+
+      var transport = new Real422RevokedTransport();
+      var client = ClientHelper.MakeClient(config, transport, store, now);
+
+      Assert.Equal(KeylightState.Licensed, client.State); // sanity before
+
+      await client.ValidateAsync();
+
+      Assert.Equal(1, transport.ValidateCalls);
+      Assert.Equal(KeylightState.Invalid, client.State);
+      Assert.False(client.HasEntitlement("pro"));
+    }
+
+    [Fact]
+    public async Task CheckOnLaunchAsync_real_422_revoke_with_no_lease_denies() {
+      var (lease, trustedKeys, now) = Vectors.Get("valid-active");
+      var config = ClientHelper.MakeConfig(trustedKeys);
+      var store = new MemoryLeaseStore();
+      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+
+      var transport = new Real422RevokedTransport();
+      var client = ClientHelper.MakeClient(config, transport, store, now);
+
+      Assert.Equal(KeylightState.Licensed, client.State); // sanity before
+
+      await client.CheckOnLaunchAsync();
+
+      Assert.Equal(1, transport.ValidateCalls);
+      Assert.Equal(KeylightState.Invalid, client.State);
+      Assert.False(client.HasEntitlement("pro"));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_real_422_with_expired_lease_keeps_lease_resolves_expired() {
+      var (activeLease, trustedKeys, now) = Vectors.Get("valid-active");
+      var (expiredLease, _, _) = Vectors.Get("expired-status");
+      var config = ClientHelper.MakeConfig(trustedKeys);
+      var store = new MemoryLeaseStore();
+      store.Save(new CachedState { Lease = activeLease, InstanceId = "inst-001", FetchedAt = now });
+
+      var transport = new Real422ExpiredLeaseTransport(expiredLease);
+      var client = ClientHelper.MakeClient(config, transport, store, now);
+
+      Assert.Equal(KeylightState.Licensed, client.State); // sanity before
+
+      await client.ValidateAsync();
+
+      Assert.Equal(1, transport.ValidateCalls);
+      // The 422 carried a lease (status "expired"), so it must be kept and
+      // resolved via the normal lease-status path — NOT treated as a bare
+      // revoke and cleared to Invalid.
+      Assert.Equal(KeylightState.Expired, client.State);
+    }
+
     // ─── always-validate-on-launch regression guard ────────────────────────
 
     [Fact]
