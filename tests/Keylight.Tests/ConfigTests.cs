@@ -13,7 +13,7 @@ namespace Keylight.Tests {
       Assert.Equal("tenant-1", cfg.TenantId);
       Assert.Equal("product-1", cfg.ProductId);
       Assert.Equal("sk-test", cfg.SdkKey);
-      Assert.Equal(7, cfg.MaxOfflineDays);
+      Assert.Equal(15, cfg.MaxOfflineDays);
       Assert.Equal("https://api.keylight.dev", cfg.BaseUrl);
       Assert.NotNull(cfg.TrustedKeys);
       Assert.Empty(cfg.TrustedKeys);
