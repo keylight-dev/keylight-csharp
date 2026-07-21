@@ -5,6 +5,18 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Activate/validate no longer fail on macOS and Linux.** The default `platform`
+  telemetry field sent `RuntimeInformation.OSDescription`, which exceeds the API's
+  32-character cap on those platforms — the server rejected the whole request body
+  with a 400. The SDK now sends a canonical cross-SDK token (`macos` / `windows` /
+  `linux` / `unknown`), matching the Rust and C++ SDKs. An explicit
+  `ConfigBuilder.Platform(...)` override is unaffected. The hand-maintained Unity
+  mirror (`dev.keylight.sdk`) carries the same fix.
+
 ## [0.1.0] — 2026-06-18
 
 Initial release of the Keylight C# SDK.
