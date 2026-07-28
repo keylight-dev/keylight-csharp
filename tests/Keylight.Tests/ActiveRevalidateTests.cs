@@ -140,7 +140,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new CountingConfirmTransport(lease);
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -156,7 +156,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       long clock = now;
       var transport = new CountingConfirmTransport(lease);
@@ -179,7 +179,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new CountingConfirmTransport(lease);
 
@@ -201,7 +201,7 @@ namespace Keylight.Tests {
       var store = new MemoryLeaseStore();
       // Fetched 1 second ago — inside RefreshIfNeededAsync's 5-minute debounce
       // and nowhere near the 6 h staleness / 24 h near-expiry thresholds.
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now - 1 });
 
       var transport = new CountingConfirmTransport(lease);
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -221,7 +221,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -240,7 +240,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new Real422RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -261,7 +261,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new ThrowingValidateTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -279,7 +279,7 @@ namespace Keylight.Tests {
       var (tamperedLease, _, _) = Vectors.Get("tampered-entitlements");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = activeLease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = activeLease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new TamperedLeaseTransport(tamperedLease);
       var client = ClientHelper.MakeClient(config, transport, store, now);

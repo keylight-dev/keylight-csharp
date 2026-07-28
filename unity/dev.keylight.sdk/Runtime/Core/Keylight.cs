@@ -139,6 +139,8 @@ namespace Keylight {
       var state = new CachedState {
         Lease      = resp.Lease,
         InstanceId = resp.InstanceId,
+        // Required on every subsequent /validate and /deactivate.
+        LicenseKey = licenseKey,
         FetchedAt  = _nowSeconds()
       };
       _store.Save(state);
@@ -152,8 +154,16 @@ namespace Keylight {
     public async Task ValidateAsync(CancellationToken ct = default) {
       var cached = Cached();
       var instanceId = cached?.InstanceId ?? "";
+      var licenseKey = cached?.LicenseKey;
+
+      // The worker requires license_key; sending an empty one is a guaranteed
+      // 400. Installs that activated before the key was persisted, and
+      // trial-only devices, have none — skip the call and keep last-known-good
+      // rather than burning a round-trip on a certain rejection.
+      if (string.IsNullOrEmpty(licenseKey)) return;
 
       var req = new ValidateRequest {
+        LicenseKey = licenseKey!,
         InstanceId = instanceId,
         AppVersion = _config.AppVersion,
         SdkVersion = SdkInfo.Version,
@@ -189,6 +199,8 @@ namespace Keylight {
         var newState = new CachedState {
           Lease          = resp.Lease,
           InstanceId     = cached?.InstanceId,
+          // Carry the key forward: every future check-in needs it on the wire.
+          LicenseKey     = cached?.LicenseKey,
           FetchedAt      = _nowSeconds(),
           TrialStartedAt = cached?.TrialStartedAt
         };
@@ -206,6 +218,8 @@ namespace Keylight {
         var newState = new CachedState {
           Lease          = null,
           InstanceId     = cached?.InstanceId,
+          // Carry the key forward: every future check-in needs it on the wire.
+          LicenseKey     = cached?.LicenseKey,
           FetchedAt      = _nowSeconds(),
           TrialStartedAt = cached?.TrialStartedAt
         };
@@ -297,7 +311,8 @@ namespace Keylight {
 
       if (!string.IsNullOrEmpty(instanceId)) {
         try {
-          await _transport.DeactivateAsync(new DeactivateRequest { InstanceId = instanceId! }, ct)
+          await _transport.DeactivateAsync(
+              new DeactivateRequest { LicenseKey = Cached()?.LicenseKey ?? "", InstanceId = instanceId! }, ct)
             .ConfigureAwait(false);
         } catch {
           // Swallow network errors — cache is cleared regardless.

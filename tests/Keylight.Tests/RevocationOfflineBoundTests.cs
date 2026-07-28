@@ -76,7 +76,7 @@ namespace Keylight.Tests {
       // Cache was refreshed 1 second ago — well within the 5-minute debounce
       // that RefreshIfNeededAsync would normally honor. Pre-fix, CheckOnLaunchAsync
       // delegated to RefreshIfNeededAsync and would skip the server entirely here.
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now - 1 });
 
       var transport = new RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -97,7 +97,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now - 1 });
 
       var transport = new ThrowingValidateTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -122,7 +122,7 @@ namespace Keylight.Tests {
       // The lease's own ExpiresAt is far beyond "now" — it is NOT naturally
       // expired — so any denial can only come from the offline-day gate.
       long fetchedAt = vectorNow - 20L * 86400L;
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = fetchedAt });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = fetchedAt });
 
       var client = ClientHelper.MakeClient(config, new FakeTransport(_ => new ActivateResponse()), store, vectorNow);
 
@@ -143,7 +143,7 @@ namespace Keylight.Tests {
       var store = new MemoryLeaseStore();
 
       long fetchedAt = vectorNow - 400L * 86400L; // over a year offline
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = fetchedAt });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = fetchedAt });
 
       var client = ClientHelper.MakeClient(config, new FakeTransport(_ => new ActivateResponse()), store, vectorNow);
 
@@ -158,7 +158,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -176,7 +176,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new ThrowingValidateTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -238,7 +238,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new Real422RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -257,7 +257,7 @@ namespace Keylight.Tests {
       var (lease, trustedKeys, now) = Vectors.Get("valid-active");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now - 1 });
 
       var transport = new Real422RevokedTransport();
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -277,7 +277,7 @@ namespace Keylight.Tests {
       var (expiredLease, _, _) = Vectors.Get("expired-status");
       var config = ClientHelper.MakeConfig(trustedKeys);
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { Lease = activeLease, InstanceId = "inst-001", FetchedAt = now });
+      store.Save(new CachedState { Lease = activeLease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
       var transport = new Real422ExpiredLeaseTransport(expiredLease);
       var client = ClientHelper.MakeClient(config, transport, store, now);
@@ -302,7 +302,7 @@ namespace Keylight.Tests {
       var store = new MemoryLeaseStore();
       // FetchedAt just 1 second ago: RefreshIfNeededAsync's own debounce (5 min)
       // would skip this. CheckOnLaunchAsync must not delegate to it any more.
-      store.Save(new CachedState { Lease = lease, InstanceId = "inst-001", FetchedAt = now - 1 });
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now - 1 });
 
       var transport = new ConfirmingTransport(lease);
       var client = ClientHelper.MakeClient(config, transport, store, now);

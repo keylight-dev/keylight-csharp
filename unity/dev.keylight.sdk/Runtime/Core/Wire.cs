@@ -28,6 +28,9 @@ namespace Keylight {
 
   /// <summary>Request body for the /validate endpoint.</summary>
   public sealed class ValidateRequest {
+    /// <summary>Required by the worker (validate.ts: <c>z.string().min(1)</c>);
+    /// omitting it is a hard 400, not a dropped field.</summary>
+    public string LicenseKey { get; set; } = "";
     public string InstanceId { get; set; } = "";
     public string? AppVersion { get; set; }
     public string? SdkVersion { get; set; }
@@ -35,6 +38,7 @@ namespace Keylight {
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
+        ["license_key"] = LicenseKey,
         ["instance_id"] = InstanceId,
         ["app_version"] = AppVersion,
         ["sdk_version"] = SdkVersion,
@@ -46,10 +50,13 @@ namespace Keylight {
 
   /// <summary>Request body for the /deactivate endpoint.</summary>
   public sealed class DeactivateRequest {
+    /// <summary>Required by the worker (deactivate.ts: <c>z.string().min(1)</c>).</summary>
+    public string LicenseKey { get; set; } = "";
     public string InstanceId { get; set; } = "";
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
+        ["license_key"] = LicenseKey,
         ["instance_id"] = InstanceId
       };
       return JsonCodec.Stringify(obj);
