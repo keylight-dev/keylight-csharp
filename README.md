@@ -135,6 +135,7 @@ await client.DeactivateAsync();
 | `DeactivateAsync()` | Releases the seat and clears local license state, even if the network call fails. Call on uninstall or device switch. |
 | `RefreshIfNeededAsync()` | Validates only if due (debounce 5 min, stale 6 h, or within 24 h of expiry). Safe to call often. |
 | `CheckOnLaunchAsync()` | Convenience: refresh if a license is stored; also auto-starts the trial clock on first launch. |
+| `ActiveRevalidateAsync()` | Forces a validate on active use (foreground / popover / focus), debounced 60 s in memory. Bypasses the staleness gates so a revoke lands mid-session instead of at the next launch. Never throws; a transient failure never downgrades a live session. |
 
 Synchronous wrappers `Activate(key)`, `Validate()`, and `Deactivate()` are provided for callers
 that cannot use `async`/`await` (every `await` in the async path uses `ConfigureAwait(false)`).
@@ -212,7 +213,14 @@ There are **no background timers**. The host drives refresh on launch and on mea
 ```csharp
 await client.CheckOnLaunchAsync();    // validate if due + auto-start trial clock
 await client.RefreshIfNeededAsync();  // call again on window-focus / purchase / resume
+await client.ActiveRevalidateAsync(); // app came forward: force a check (60 s debounce)
 ```
+
+`RefreshIfNeededAsync` is the cheap, often-called path — it skips the server when the cache is
+fresh. `ActiveRevalidateAsync` is the prompt one: it always talks to the server (debounced to
+60 s) so a dashboard revoke takes effect within minutes of the user touching the app rather than
+waiting for the lease to expire or the app to relaunch. Wire it to whatever "the user is here
+now" signal your host has — app activation, window focus, menu-bar popover opening.
 
 Trials are local and offline-first. Set `TrialDurationDays` on the builder, then call
 `CheckOnLaunchAsync` — the trial clock is started automatically on the first launch when no trusted

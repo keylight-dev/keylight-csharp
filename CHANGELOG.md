@@ -5,6 +5,19 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`ActiveRevalidateAsync()` — prompt revocation enforcement mid-session.** Forces a server
+  validate on active use (app foreground, window focus, popover open), debounced to 60 seconds
+  in memory. Unlike `RefreshIfNeededAsync` it is never skipped for staleness, so a dashboard
+  revoke lands within minutes instead of waiting for the next launch. A definitive rejection
+  (`valid:false`, including the HTTP 422 revoke shape) downgrades immediately; a transient or
+  thrown failure leaves the session untouched. Mirrors the Swift SDK's `activeRevalidate()`.
+  The hand-maintained Unity mirror (`dev.keylight.sdk`) gets the same primitive so it does not
+  drift again.
+
 ## [0.1.1] — 2026-07-08
 
 ### Fixed

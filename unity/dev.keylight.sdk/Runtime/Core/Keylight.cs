@@ -19,6 +19,14 @@ namespace Keylight {
     // deterministic clock without altering production behaviour.
     private readonly Func<long> _nowSeconds;
 
+    // ─── active-revalidate debounce ──────────────────────────────────────────
+    // Unix-second stamp of the last ActiveRevalidateAsync attempt. Held in
+    // memory ONLY — never written to the store — so a process restart is free
+    // to revalidate immediately.
+    private long? _lastActiveRevalidateAt;
+
+    private const long ActiveRevalidateDebounceSeconds = 60;
+
     private static long RealNow() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
     // ─── constructors ────────────────────────────────────────────────────────
@@ -213,6 +221,50 @@ namespace Keylight {
       // Refresh if stale (>6h) or near expiry
       if (ageSeconds >= 21600 || nearExpiry)
         await ValidateAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Forces an immediate server revalidation on active use (app foreground,
+    /// window focused), debounced to 60 seconds. Unlike
+    /// <see cref="RefreshIfNeededAsync"/> this is never skipped for staleness
+    /// reasons, so a dashboard revoke takes effect within minutes of the user
+    /// touching the app instead of lagging until the next launch
+    /// (<see cref="CheckOnLaunchAsync"/>).
+    ///
+    /// A definitive server rejection (<c>valid:false</c>, including the
+    /// worker's HTTP 422 revoke shape) downgrades the cached state
+    /// immediately. A transient/thrown failure leaves the cached state
+    /// untouched — a live session is never downgraded on a network blip.
+    /// Never throws.
+    ///
+    /// A no-op when nothing is stored, or when the stored state has never been
+    /// activated (trial-only: no instance id and no lease).
+    ///
+    /// The debounce is held in memory only and is deliberately not persisted:
+    /// a fresh process revalidates on its first call.
+    /// </summary>
+    public async Task ActiveRevalidateAsync(CancellationToken ct = default) {
+      var cached = _store.Load();
+      if (cached == null) return;
+      if (string.IsNullOrEmpty(cached.InstanceId) && cached.Lease == null) return;
+
+      var now = _nowSeconds();
+      if (_lastActiveRevalidateAt.HasValue &&
+          (now - _lastActiveRevalidateAt.Value) < ActiveRevalidateDebounceSeconds)
+        return;
+
+      // Stamp before the call (mirrors the Swift SDK): a failing attempt still
+      // consumes the window, so a flapping network can't be hammered.
+      _lastActiveRevalidateAt = now;
+
+      try {
+        await ValidateAsync(ct).ConfigureAwait(false);
+      } catch {
+        // Transient — never downgrade a live session on a blip. ValidateAsync
+        // already swallows genuine transport failures; this guard additionally
+        // absorbs a LeaseVerificationFailedException from a server payload we
+        // refuse to trust.
+      }
     }
 
     /// <summary>
