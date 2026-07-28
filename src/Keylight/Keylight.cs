@@ -150,9 +150,7 @@ namespace Keylight {
     /// returns a new lease.
     /// </summary>
     public async Task ValidateAsync(CancellationToken ct = default) {
-      // Use cached state; prime if needed.
-      if (!_cachePopulated) RefreshCache();
-      var cached = _cachedState;
+      var cached = Cached();
       var instanceId = cached?.InstanceId ?? "";
 
       var req = new ValidateRequest {
@@ -224,10 +222,7 @@ namespace Keylight {
     /// expiry. A no-op if no license is stored.
     /// </summary>
     public async Task RefreshIfNeededAsync(CancellationToken ct = default) {
-      // Use cached state to avoid a redundant _store.Load().
-      // If cache is unpopulated, prime it now.
-      if (!_cachePopulated) RefreshCache();
-      var cached = _cachedState;
+      var cached = Cached();
       if (cached == null) return;
 
       var now = _nowSeconds();
@@ -267,10 +262,10 @@ namespace Keylight {
     /// a fresh process revalidates on its first call.
     /// </summary>
     public async Task ActiveRevalidateAsync(CancellationToken ct = default) {
-      // Use cached state to avoid a redundant _store.Load(); prime if needed.
-      if (!_cachePopulated) RefreshCache();
-      var cached = _cachedState;
+      var cached = Cached();
       if (cached == null) return;
+      // Never activated (trial-only: no instance id and no lease) — there is
+      // nothing for the server to revalidate.
       if (string.IsNullOrEmpty(cached.InstanceId) && cached.Lease == null) return;
 
       var now = _nowSeconds();
@@ -298,10 +293,7 @@ namespace Keylight {
     /// the server call succeeds, mirroring JS/Rust parity.
     /// </summary>
     public async Task DeactivateAsync(CancellationToken ct = default) {
-      // Use cached state; prime if needed.
-      if (!_cachePopulated) RefreshCache();
-      var cached = _cachedState;
-      var instanceId = cached?.InstanceId;
+      var instanceId = Cached()?.InstanceId;
 
       if (!string.IsNullOrEmpty(instanceId)) {
         try {
@@ -388,6 +380,17 @@ namespace Keylight {
       _cachePopulated = true;
     }
 
+    /// <summary>
+    /// Returns the current <see cref="CachedState"/>, priming the cache from
+    /// the store on first use. Every path that needs the stored state goes
+    /// through here, so "load from disk at most once" is stated in exactly one
+    /// place instead of being re-derived at each call site.
+    /// </summary>
+    private CachedState? Cached() {
+      if (!_cachePopulated) RefreshCache();
+      return _cachedState;
+    }
+
     // ─── private helpers ─────────────────────────────────────────────────────
 
     /// <summary>
@@ -396,74 +399,70 @@ namespace Keylight {
     /// "gated" lease used by HasEntitlement.
     /// </summary>
     private Lease? GetCachedTrustedLease() {
-      // Ensure cache is populated (first read after construction or after a
-      // write path has not yet called RefreshCache — defensive guard).
-      if (!_cachePopulated) RefreshCache();
+      var cached = Cached();
+      var now = _nowSeconds();
 
       if (_config.MaxOfflineDays > 0) {
-        if (_cachedState == null) return null;
-        var offlineSeconds = _nowSeconds() - _cachedState.FetchedAt;
-        if (offlineSeconds > (long)_config.MaxOfflineDays * 86400) return null;
+        if (cached == null) return null;
+        if (IsBeyondOfflineCap(cached, now)) return null;
       }
 
-      var raw = _cachedState?.Lease;
+      var raw = cached?.Lease;
       if (raw == null) return null;
 
       // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
       var r = _cachedVerifyResult!.Value;
-      bool expired = _nowSeconds() > raw.ExpiresAt + Verifier.SkewSeconds;
+      bool expired = now > raw.ExpiresAt + Verifier.SkewSeconds;
       return (Verifier.IsTrusted(r) && !expired && raw.Status != "expired") ? raw : null;
     }
+
+    /// <summary>
+    /// True when the last successful server contact is older than
+    /// <see cref="KeylightConfig.MaxOfflineDays"/>. Callers must have already
+    /// checked that the cap is enabled (<c>MaxOfflineDays &gt; 0</c>); a value
+    /// of zero or less disables the cap entirely (air-gapped consumers).
+    /// </summary>
+    private bool IsBeyondOfflineCap(CachedState cached, long now)
+      => (now - cached.FetchedAt) > (long)_config.MaxOfflineDays * 86400;
 
     /// <summary>
     /// Resolves <see cref="KeylightState"/> from the raw cached lease (no
     /// offline-grace gating for the status read — mirrors JS state() logic).
     /// </summary>
     private KeylightState ResolveState() {
-      // Ensure cache is populated.
-      if (!_cachePopulated) RefreshCache();
+      var cached = Cached();
+      var now = _nowSeconds();
 
-      var rawLease = _cachedState?.Lease;
+      var rawLease = cached?.Lease;
       if (rawLease == null) return CheckTrialOrInvalid();
 
       // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
       var r = _cachedVerifyResult!.Value;
       if (!Verifier.IsTrusted(r)) return CheckTrialOrInvalid();
 
-      bool expired = _nowSeconds() > rawLease.ExpiresAt + Verifier.SkewSeconds;
+      // Only "active" can resolve to anything other than Expired: a trusted
+      // lease that is expired / fallback (limited — the C# enum has no Limited
+      // member) / an unrecognised status all read as Expired.
+      if (rawLease.Status != "active") return KeylightState.Expired;
 
-      // Trusted lease: resolve by status
-      switch (rawLease.Status) {
-        case "active":
-          if (expired) return KeylightState.Expired;
-          // Bound offline use: a signed lease can outlive MaxOfflineDays of
-          // no successful server contact. Once that cap is exceeded, State
-          // must stop reporting Licensed even though the cached lease itself
-          // hasn't expired yet — mirrors the gate GetCachedTrustedLease
-          // already applies to HasEntitlement. MaxOfflineDays <= 0 disables
-          // the cap (air-gapped consumers).
-          if (_config.MaxOfflineDays > 0) {
-            var offlineSeconds = _nowSeconds() - _cachedState!.FetchedAt;
-            if (offlineSeconds > (long)_config.MaxOfflineDays * 86400) return KeylightState.Expired;
-          }
-          return KeylightState.Licensed;
-        case "expired":
-          return KeylightState.Expired;
-        case "fallback":
-          // Limited state — map to Expired (C# enum has no Limited)
-          return KeylightState.Expired;
-        default:
-          return KeylightState.Expired;
-      }
+      if (now > rawLease.ExpiresAt + Verifier.SkewSeconds) return KeylightState.Expired;
+
+      // Bound offline use: a signed lease can outlive MaxOfflineDays of no
+      // successful server contact. Once that cap is exceeded, State must stop
+      // reporting Licensed even though the cached lease itself hasn't expired
+      // yet — mirrors the gate GetCachedTrustedLease already applies to
+      // HasEntitlement.
+      if (_config.MaxOfflineDays > 0 && IsBeyondOfflineCap(cached!, now))
+        return KeylightState.Expired;
+
+      return KeylightState.Licensed;
     }
 
     private KeylightState CheckTrialOrInvalid() {
       if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
-        // _cachedState is already populated by the caller (ResolveState or
-        // GetCachedTrustedLease) so no additional _store.Load() is needed.
-        if (_cachedState?.TrialStartedAt.HasValue == true) {
-          var trialStart = _cachedState.TrialStartedAt.Value;
-          var trialEndSeconds = trialStart + (long)_config.TrialDurationDays.Value * 86400L;
+        var trialStartedAt = Cached()?.TrialStartedAt;
+        if (trialStartedAt.HasValue) {
+          var trialEndSeconds = trialStartedAt.Value + (long)_config.TrialDurationDays.Value * 86400L;
           return _nowSeconds() < trialEndSeconds
             ? KeylightState.Trial
             : KeylightState.Expired;
