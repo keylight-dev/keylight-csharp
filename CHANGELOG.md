@@ -29,13 +29,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Activate/validate no longer fail on macOS and Linux.** The default `platform` telemetry
+  field sent `RuntimeInformation.OSDescription`, which exceeds the API's 32-character cap on
+  those platforms — the server rejected the whole request body with a 400. The SDK now sends
+  a short OS token (`macos` / `windows` / `linux` / `unknown`), matching the Rust SDK. The
+  hand-maintained Unity mirror (`dev.keylight.sdk`) carries the same fix.
+
 - **Telemetry fields are clamped to the API's limits.** `app_version` and `sdk_version` are
   truncated to 64 and `platform` to 32 before being sent. An over-long value is rejected by
   the API with a 400 for the *whole* request — the field is not simply dropped — and
   `app_version` comes from the host app, so an app with a long version string could fail
-  every activate and validate outright. This is the same failure the `OSDescription` platform
-  bug caused on macOS and Linux; clamping now happens at the wire boundary, so an explicit
-  `ConfigBuilder.Platform(...)` override is covered too. Parity with the Rust and JS SDKs.
+  every activate and validate outright. Clamping happens at the wire boundary, so it also
+  covers an explicit `ConfigBuilder.Platform(...)` override, which bypasses the canonical
+  token above. Defence in depth for the same class of failure. Parity with Rust and JS.
 
 - **The `ActiveRevalidateAsync()` debounce no longer follows the wall clock.** It now measures
   elapsed time from a monotonic source. Because the debounce *suppresses* revalidation, a

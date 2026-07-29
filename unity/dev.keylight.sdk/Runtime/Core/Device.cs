@@ -8,11 +8,18 @@ namespace Keylight {
   /// </summary>
   internal static class Device {
     /// <summary>
-    /// Coarse OS description string sent as <c>platform</c> in activate/validate
-    /// requests. Uses <see cref="RuntimeInformation.OSDescription"/> so it
-    /// identifies the host OS without sending full User-Agent.
+    /// Canonical platform token sent as <c>platform</c> in activate/validate
+    /// requests (parity with Rust/C++: <c>macos</c>/<c>windows</c>/<c>linux</c>/
+    /// <c>unknown</c>). Must stay a short fixed token — the API caps the field
+    /// at 32 chars and rejects the whole request body past that, so a free-form
+    /// OS description (the previous behavior) 400s every activate/validate on
+    /// macOS and Linux.
     /// </summary>
-    public static string Platform { get; } = RuntimeInformation.OSDescription ?? "unknown";
+    public static string Platform { get; } =
+      RuntimeInformation.IsOSPlatform(OSPlatform.OSX)     ? "macos"
+      : RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "windows"
+      : RuntimeInformation.IsOSPlatform(OSPlatform.Linux)   ? "linux"
+      : "unknown";
 
     /// <summary>
     /// A human-readable instance name for the current device, sent as
