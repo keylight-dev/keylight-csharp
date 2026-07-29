@@ -27,9 +27,19 @@ namespace Keylight {
     /// <summary>HTTP status code from the server (e.g. 409, 422, 429, 500).</summary>
     public int StatusCode { get; }
 
-    public ActivationException(int statusCode, string message)
+    /// <summary>
+    /// Raw HTTP response body, when one was received (i.e. the server actually
+    /// responded — as opposed to a transport-level failure with no response at
+    /// all). Callers that need to distinguish a decodable definitive-rejection
+    /// body (e.g. <c>/validate</c>'s HTTP 422 revoke shape) from a genuine
+    /// network error can key off this being non-null.
+    /// </summary>
+    public string? Body { get; }
+
+    public ActivationException(int statusCode, string message, string? body = null)
       : base(message) {
       StatusCode = statusCode;
+      Body = body;
     }
 
     /// <summary>Constructs from a server error response with no extra message.</summary>

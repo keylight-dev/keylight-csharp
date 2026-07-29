@@ -121,7 +121,7 @@ namespace Keylight.Tests {
       // Pre-populate store with the valid active lease (as if activation already happened)
       store.Save(new CachedState {
         Lease = lease,
-        InstanceId = "inst-001",
+        LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001",
         FetchedAt = now,
         // Also seed a trial start to ensure Licensed still wins
         TrialStartedAt = now - 86400L
