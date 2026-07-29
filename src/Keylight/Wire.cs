@@ -17,9 +17,11 @@ namespace Keylight {
       var obj = new Dictionary<string, object?> {
         ["license_key"]   = LicenseKey,
         ["instance_name"] = InstanceName,
-        ["app_version"]   = AppVersion,
-        ["sdk_version"]   = SdkVersion,
-        ["platform"]      = Platform,
+        // Clamped here so no caller can construct an over-long field: the server
+        // rejects the entire body with a 400, it does not drop the field.
+        ["app_version"]   = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
+        ["sdk_version"]   = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
+        ["platform"]      = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
         ["free_tier_instance_id"] = FreeTierInstanceId
       };
       return JsonCodec.Stringify(obj);
@@ -40,9 +42,10 @@ namespace Keylight {
       var obj = new Dictionary<string, object?> {
         ["license_key"] = LicenseKey,
         ["instance_id"] = InstanceId,
-        ["app_version"] = AppVersion,
-        ["sdk_version"] = SdkVersion,
-        ["platform"]    = Platform
+        // See ActivateRequest.ToJson — clamped for the same reason.
+        ["app_version"] = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
+        ["sdk_version"] = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
+        ["platform"]    = Telemetry.Clamp(Platform, Telemetry.PlatformMax)
       };
       return JsonCodec.Stringify(obj);
     }

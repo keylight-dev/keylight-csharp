@@ -29,14 +29,39 @@ namespace Keylight {
     private VerifyResult? _cachedVerifyResult;  // null when no lease on disk
 
     // ─── active-revalidate debounce ──────────────────────────────────────────
-    // Unix-second stamp of the last ActiveRevalidateAsync attempt. Held in
-    // memory ONLY — never written to the store — so a process restart is free
-    // to revalidate immediately.
+    // Monotonic-millisecond stamp of the last ActiveRevalidateAsync attempt.
+    // Held in memory ONLY — never written to the store — so a process restart is
+    // free to revalidate immediately.
+    //
+    // Deliberately NOT on the wall clock. The debounce suppresses revalidation,
+    // so a clock that moves backwards suppresses revocation enforcement for the
+    // size of the jump — and on a licensing SDK, moving the clock backwards is
+    // an adversarial move we already defend against elsewhere, not just an NTP
+    // correction. A monotonic source cannot be steered this way.
     private long? _lastActiveRevalidateAt;
 
-    private const long ActiveRevalidateDebounceSeconds = 60;
+    private const long ActiveRevalidateDebounceMillis = 60_000;
+
+    // Monotonic source for the active-revalidate debounce. Exposed as an
+    // internal constructor parameter for the same reason as _nowSeconds: the
+    // 60s window is untestable otherwise.
+    private readonly Func<long> _monotonicMillis;
 
     private static long RealNow() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+    /// <summary>
+    /// Process-lifetime monotonic clock. Unaffected by wall-clock changes, NTP
+    /// steps, and timezone/DST transitions.
+    ///
+    /// A Stopwatch rather than Environment.TickCount64 because this assembly
+    /// still targets netstandard2.0, where TickCount64 does not exist; and
+    /// rather than scaling Stopwatch.GetTimestamp() by hand, which overflows a
+    /// long once uptime gets large on a nanosecond-frequency timer.
+    /// </summary>
+    private static readonly System.Diagnostics.Stopwatch MonotonicClock =
+      System.Diagnostics.Stopwatch.StartNew();
+
+    private static long RealMonotonicMillis() => MonotonicClock.ElapsedMilliseconds;
 
     // ─── constructors ────────────────────────────────────────────────────────
 
@@ -61,12 +86,14 @@ namespace Keylight {
       KeylightConfig config,
       ILeaseStore? store,
       IKeylightTransport? transport,
-      Func<long>? nowSeconds) {
+      Func<long>? nowSeconds,
+      Func<long>? monotonicMillis = null) {
       _config = config ?? throw new ArgumentNullException(nameof(config));
       _store = store ?? new FileLeaseStore();
       _transport = transport ?? new HttpClientTransport(
         config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       _nowSeconds = nowSeconds ?? RealNow;
+      _monotonicMillis = monotonicMillis ?? RealMonotonicMillis;
     }
 
     // ─── public API — version ────────────────────────────────────────────────
@@ -82,6 +109,36 @@ namespace Keylight {
     /// lease is present.
     /// </summary>
     public KeylightState State => ResolveState();
+
+    /// <summary>
+    /// True when this device activated under an SDK build that did not persist
+    /// the license key, leaving it unable to check in with the server.
+    ///
+    /// <para><b>Why this exists.</b> /validate and /deactivate both require
+    /// <c>license_key</c> on the wire, and the key is not recoverable from local
+    /// state — the cached lease carries only <c>LicenseKeyHash</c>. Such an
+    /// install can never refresh its lease, so once the cached lease passes its
+    /// own 7-day expiry <see cref="State"/> drops to
+    /// <see cref="KeylightState.Expired"/> and stays there. That strands a
+    /// PAYING customer, and it also delays revocation by up to the same 7 days.
+    /// Only re-running <see cref="ActivateAsync"/> with the key can recover
+    /// it.</para>
+    ///
+    /// <para><b>What to do with it.</b> Prompt for the license key and call
+    /// <see cref="ActivateAsync"/>. Check it at launch, before the lease lapses,
+    /// so recovery is a prompt rather than a lockout. Trial-only devices —
+    /// which never activated and are not stranded — report false.</para>
+    /// </summary>
+    public bool NeedsReactivation {
+      get {
+        var cached = Cached();
+        if (cached == null) return false;
+        if (!string.IsNullOrEmpty(cached.LicenseKey)) return false;
+        // Something was activated here (an instance id or a lease) but the key
+        // that produced it was never stored.
+        return !string.IsNullOrEmpty(cached.InstanceId) || cached.Lease != null;
+      }
+    }
 
     /// <summary>
     /// Returns true if the cached trusted lease contains the given entitlement
@@ -160,6 +217,10 @@ namespace Keylight {
       // 400. Installs that activated before the key was persisted, and
       // trial-only devices, have none — skip the call and keep last-known-good
       // rather than burning a round-trip on a certain rejection.
+      //
+      // This is silent by design (a hot path must not throw), so the stranded
+      // case is surfaced separately via NeedsReactivation — see that property
+      // for why such an install lapses to Expired within the lease's 7 days.
       if (string.IsNullOrEmpty(licenseKey)) return;
 
       var req = new ValidateRequest {
@@ -282,9 +343,9 @@ namespace Keylight {
       // nothing for the server to revalidate.
       if (string.IsNullOrEmpty(cached.InstanceId) && cached.Lease == null) return;
 
-      var now = _nowSeconds();
+      var now = _monotonicMillis();
       if (_lastActiveRevalidateAt.HasValue &&
-          (now - _lastActiveRevalidateAt.Value) < ActiveRevalidateDebounceSeconds)
+          (now - _lastActiveRevalidateAt.Value) < ActiveRevalidateDebounceMillis)
         return;
 
       // Stamp before the call (mirrors the Swift SDK): a failing attempt still

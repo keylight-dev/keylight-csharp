@@ -158,16 +158,52 @@ namespace Keylight.Tests {
       var store = new MemoryLeaseStore();
       store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
 
-      long clock = now;
+      // The debounce runs off the MONOTONIC clock, not the wall clock, so drive
+      // that one — advancing `nowSeconds` alone no longer moves the window.
+      long monotonic = 0;
       var transport = new CountingConfirmTransport(lease);
-      var client = new KeylightClient(config, store: store, transport: transport, nowSeconds: () => clock);
+      var client = new KeylightClient(
+        config, store: store, transport: transport, nowSeconds: () => now,
+        monotonicMillis: () => monotonic);
 
       await client.ActiveRevalidateAsync();
-      clock = now + 59;               // still inside the window
+      monotonic = 59_000;             // still inside the window
       await client.ActiveRevalidateAsync();
       Assert.Equal(1, transport.ValidateCalls);
 
-      clock = now + 61;               // window elapsed
+      monotonic = 61_000;             // window elapsed
+      await client.ActiveRevalidateAsync();
+      Assert.Equal(2, transport.ValidateCalls);
+    }
+
+    /// <summary>
+    /// The debounce suppresses revalidation, so anchoring it to the wall clock
+    /// let a backwards clock jump suppress revocation enforcement for the size
+    /// of the jump. On a licensing SDK that is an adversarial move, not just an
+    /// NTP correction: set the clock back and the app stops checking in.
+    /// A monotonic source cannot be steered this way.
+    /// </summary>
+    [Fact]
+    public async Task ActiveRevalidateAsync_debounce_is_immune_to_a_backwards_wall_clock() {
+      var (lease, trustedKeys, now) = Vectors.Get("valid-active");
+      var config = ClientHelper.MakeConfig(trustedKeys);
+      var store = new MemoryLeaseStore();
+      store.Save(new CachedState { Lease = lease, LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001", FetchedAt = now });
+
+      long wallClock = now;
+      long monotonic = 0;
+      var transport = new CountingConfirmTransport(lease);
+      var client = new KeylightClient(
+        config, store: store, transport: transport, nowSeconds: () => wallClock,
+        monotonicMillis: () => monotonic);
+
+      await client.ActiveRevalidateAsync();
+      Assert.Equal(1, transport.ValidateCalls);
+
+      // User winds the wall clock back a day; real time still moves forward.
+      wallClock = now - 86_400;
+      monotonic = 61_000;
+
       await client.ActiveRevalidateAsync();
       Assert.Equal(2, transport.ValidateCalls);
     }
