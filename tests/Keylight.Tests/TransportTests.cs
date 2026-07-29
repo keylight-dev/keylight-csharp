@@ -1,3 +1,4 @@
+using System.Reflection;
 using Keylight;
 using Xunit;
 
@@ -107,5 +108,25 @@ public class TransportTests {
     Assert.NotNull(resp);
     Assert.False(resp!.Valid);
     Assert.Null(resp.Lease);
+  }
+
+  /// <summary>
+  /// Drift guard for the <c>sdk_version</c> telemetry field.
+  /// <c>SdkInfo.Version</c> is a hand-maintained const and the shipped package
+  /// version lives in <c>Keylight.csproj</c>; nothing previously tied the two
+  /// together. When they drift, every activate/validate reports the wrong SDK
+  /// release to the Keylight usage analytics and no build or test fails — the
+  /// numbers are just quietly wrong. The csproj <c>Version</c> flows into
+  /// <c>AssemblyInformationalVersion</c>, which SourceLink suffixes with
+  /// <c>+&lt;commit sha&gt;</c>, so only the version part is compared.
+  /// </summary>
+  [Fact]
+  public void SdkInfo_version_matches_the_shipped_package_version() {
+    var informational = typeof(KeylightClient).Assembly
+      .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+      ?.InformationalVersion;
+
+    Assert.NotNull(informational);
+    Assert.Equal(SdkInfo.Version, informational!.Split('+')[0]);
   }
 }

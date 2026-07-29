@@ -17,9 +17,11 @@ namespace Keylight {
       var obj = new Dictionary<string, object?> {
         ["license_key"]   = LicenseKey,
         ["instance_name"] = InstanceName,
-        ["app_version"]   = AppVersion,
-        ["sdk_version"]   = SdkVersion,
-        ["platform"]      = Platform,
+        // Clamped here so no caller can construct an over-long field: the server
+        // rejects the entire body with a 400, it does not drop the field.
+        ["app_version"]   = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
+        ["sdk_version"]   = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
+        ["platform"]      = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
         ["free_tier_instance_id"] = FreeTierInstanceId
       };
       return JsonCodec.Stringify(obj);
@@ -28,6 +30,9 @@ namespace Keylight {
 
   /// <summary>Request body for the /validate endpoint.</summary>
   public sealed class ValidateRequest {
+    /// <summary>Required by the worker (validate.ts: <c>z.string().min(1)</c>);
+    /// omitting it is a hard 400, not a dropped field.</summary>
+    public string LicenseKey { get; set; } = "";
     public string InstanceId { get; set; } = "";
     public string? AppVersion { get; set; }
     public string? SdkVersion { get; set; }
@@ -35,10 +40,12 @@ namespace Keylight {
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
+        ["license_key"] = LicenseKey,
         ["instance_id"] = InstanceId,
-        ["app_version"] = AppVersion,
-        ["sdk_version"] = SdkVersion,
-        ["platform"]    = Platform
+        // See ActivateRequest.ToJson — clamped for the same reason.
+        ["app_version"] = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
+        ["sdk_version"] = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
+        ["platform"]    = Telemetry.Clamp(Platform, Telemetry.PlatformMax)
       };
       return JsonCodec.Stringify(obj);
     }
@@ -46,10 +53,13 @@ namespace Keylight {
 
   /// <summary>Request body for the /deactivate endpoint.</summary>
   public sealed class DeactivateRequest {
+    /// <summary>Required by the worker (deactivate.ts: <c>z.string().min(1)</c>).</summary>
+    public string LicenseKey { get; set; } = "";
     public string InstanceId { get; set; } = "";
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
+        ["license_key"] = LicenseKey,
         ["instance_id"] = InstanceId
       };
       return JsonCodec.Stringify(obj);
@@ -69,10 +79,8 @@ namespace Keylight {
       var resp = new ActivateResponse();
       resp.Activated = root.Get("activated")?.AsBool() ?? false;
       resp.InstanceId = root.Get("instance_id")?.AsString();
-      var expAt = root.Get("license_expires_at");
-      resp.LicenseExpiresAt = (expAt != null && !expAt.IsNull) ? expAt.AsLong() : null;
-      var leaseNode = root.Get("lease");
-      resp.Lease = (leaseNode != null && !leaseNode.IsNull) ? WireHelpers.ParseLease(leaseNode) : null;
+      resp.LicenseExpiresAt = root.Get("license_expires_at")?.AsLong();
+      resp.Lease = WireHelpers.ParseLease(root.Get("lease"));
       return resp;
     }
   }
@@ -89,10 +97,8 @@ namespace Keylight {
       if (root == null) return null;
       var resp = new ValidateResponse();
       resp.Valid = root.Get("valid")?.AsBool() ?? false;
-      var expAt = root.Get("license_expires_at");
-      resp.LicenseExpiresAt = (expAt != null && !expAt.IsNull) ? expAt.AsLong() : null;
-      var leaseNode = root.Get("lease");
-      resp.Lease = (leaseNode != null && !leaseNode.IsNull) ? WireHelpers.ParseLease(leaseNode) : null;
+      resp.LicenseExpiresAt = root.Get("license_expires_at")?.AsLong();
+      resp.Lease = WireHelpers.ParseLease(root.Get("lease"));
       resp.Error = root.Get("error")?.AsString();
       return resp;
     }
@@ -103,7 +109,7 @@ namespace Keylight {
     /// Parse a Lease from a JsonValue node.
     /// Reads camelCase keys as they come from the server.
     /// </summary>
-    internal static Lease? ParseLease(JsonValue node) {
+    internal static Lease? ParseLease(JsonValue? node) {
       if (node == null || node.IsNull) return null;
       var lease = new Lease();
       lease.Kid            = node.Get("kid")?.AsString()            ?? "";

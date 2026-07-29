@@ -93,7 +93,7 @@ var keyset = await Keyset.FetchAsync(http, "https://api.keylight.dev", "your-ten
 var config = KeylightConfig
     .Builder("your-tenant", "your-product", "sdk_live_…")
     .TrustedKeys(keyset?.Keys ?? new Dictionary<string, string>())
-    .MaxOfflineDays(7)   // optional offline grace window
+    .MaxOfflineDays(15)  // optional offline grace window (15 is the default)
     .Build();
 
 var client = new KeylightClient(config);
@@ -135,6 +135,7 @@ await client.DeactivateAsync();
 | `DeactivateAsync()` | Releases the seat and clears local license state, even if the network call fails. Call on uninstall or device switch. |
 | `RefreshIfNeededAsync()` | Validates only if due (debounce 5 min, stale 6 h, or within 24 h of expiry). Safe to call often. |
 | `CheckOnLaunchAsync()` | Convenience: refresh if a license is stored; also auto-starts the trial clock on first launch. |
+| `ActiveRevalidateAsync()` | Forces a validate on active use (foreground / popover / focus), debounced 60 s in memory. Bypasses the staleness gates so a revoke lands mid-session instead of at the next launch. Never throws; a transient failure never downgrades a live session. |
 
 Synchronous wrappers `Activate(key)`, `Validate()`, and `Deactivate()` are provided for callers
 that cannot use `async`/`await` (every `await` in the async path uses `ConfigureAwait(false)`).
@@ -196,7 +197,7 @@ var config = KeylightConfig
     {
         { "k1", "<raw Ed25519 public key, base64>" }
     })
-    .MaxOfflineDays(7)  // omit to run offline as long as the lease itself is current
+    .MaxOfflineDays(15)  // default; omit to run offline as long as the lease itself is current
     .Build();
 ```
 
@@ -212,7 +213,14 @@ There are **no background timers**. The host drives refresh on launch and on mea
 ```csharp
 await client.CheckOnLaunchAsync();    // validate if due + auto-start trial clock
 await client.RefreshIfNeededAsync();  // call again on window-focus / purchase / resume
+await client.ActiveRevalidateAsync(); // app came forward: force a check (60 s debounce)
 ```
+
+`RefreshIfNeededAsync` is the cheap, often-called path — it skips the server when the cache is
+fresh. `ActiveRevalidateAsync` is the prompt one: it always talks to the server (debounced to
+60 s) so a dashboard revoke takes effect within minutes of the user touching the app rather than
+waiting for the lease to expire or the app to relaunch. Wire it to whatever "the user is here
+now" signal your host has — app activation, window focus, menu-bar popover opening.
 
 Trials are local and offline-first. Set `TrialDurationDays` on the builder, then call
 `CheckOnLaunchAsync` — the trial clock is started automatically on the first launch when no trusted
@@ -241,7 +249,7 @@ Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
 |----------------|------|---------|-------------|
 | _(required)_ `Builder(tenantId, productId, sdkKey)` | `string` | — | Your Keylight tenant, product, and SDK key. All three are required. |
 | `.TrustedKeys(dict)` | `IDictionary<string,string>` | empty | Trusted Ed25519 public keys (`kid → base64`) for offline verification. |
-| `.MaxOfflineDays(n)` | `int` | `7` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
+| `.MaxOfflineDays(n)` | `int` | `15` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
 | `.TrialDurationDays(n)` | `int` | — | Local trial length in days. Omit to disable trials. |
 | `.AppVersion(v)` | `string` | — | Reported in activation/validation telemetry. |
 | `.KeyPrefix(p)` | `string` | — | Client-side key-format check (e.g. `"PROD"`). |

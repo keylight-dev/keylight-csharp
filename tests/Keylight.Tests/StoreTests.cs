@@ -38,7 +38,7 @@ namespace Keylight.Tests {
       };
       var state = new CachedState {
         Lease = lease,
-        InstanceId = "inst-001",
+        LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001",
         FetchedAt = 1700000001L
       };
 

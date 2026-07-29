@@ -7,7 +7,7 @@
     <RootNamespace>Keylight</RootNamespace>
     <AssemblyName>Keylight</AssemblyName>
     <PackageId>Keylight</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.2</Version>
     <Authors>Keylight</Authors>
     <Description>Offline-first software licensing for .NET, Godot, and Unity — signed Ed25519 leases, device activations, entitlements.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

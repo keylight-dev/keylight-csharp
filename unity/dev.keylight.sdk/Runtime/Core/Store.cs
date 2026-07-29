@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Keylight.Json;
 
@@ -8,6 +7,13 @@ namespace Keylight {
   public sealed class CachedState {
     public Lease?  Lease          { get; set; }
     public string? InstanceId     { get; set; }
+    /// <summary>
+    /// The activated license key. Persisted because /validate and /deactivate
+    /// both require it on the wire — without it every check-in 400s and the
+    /// client degrades to activate-only. Null on installs that activated before
+    /// this field existed, and on trial-only devices that never activated.
+    /// </summary>
+    public string? LicenseKey     { get; set; }
     public long    FetchedAt      { get; set; }
     /// <summary>
     /// Unix-second timestamp of when the trial was started on this device.
@@ -75,13 +81,6 @@ namespace Keylight {
     // -------------------------------------------------------------------
 
     internal static string SerializeCachedState(CachedState state) {
-      var obj = new Dictionary<string, object?> {
-        ["instanceId"] = state.InstanceId,
-        ["fetchedAt"]  = (object?)state.FetchedAt
-      };
-      if (state.TrialStartedAt.HasValue)
-        obj["trialStartedAt"] = (object?)state.TrialStartedAt.Value;
-
       // Lease is serialized as a sub-object using WireHelpers
       // We build the JSON string manually to include the lease sub-object
       var sb = new System.Text.StringBuilder();
@@ -108,6 +107,16 @@ namespace Keylight {
         sb.Append('"');
       }
 
+      // licenseKey (nullable string)
+      if (state.LicenseKey != null) {
+        if (!first) sb.Append(',');
+        first = false;
+        sb.Append("\"licenseKey\":");
+        sb.Append('"');
+        JsonCodec.WriteEscapedString(sb, state.LicenseKey);
+        sb.Append('"');
+      }
+
       // fetchedAt (long)
       if (!first) sb.Append(',');
       sb.Append("\"fetchedAt\":");
@@ -129,15 +138,11 @@ namespace Keylight {
 
       var state = new CachedState();
       state.InstanceId = root.Get("instanceId")?.AsString();
+      state.LicenseKey = root.Get("licenseKey")?.AsString();
       state.FetchedAt  = root.Get("fetchedAt")?.AsLong() ?? 0;
 
-      var trialNode = root.Get("trialStartedAt");
-      state.TrialStartedAt = (trialNode != null && !trialNode.IsNull) ? trialNode.AsLong() : null;
-
-      var leaseNode = root.Get("lease");
-      state.Lease = (leaseNode != null && !leaseNode.IsNull)
-        ? WireHelpers.ParseLease(leaseNode)
-        : null;
+      state.TrialStartedAt = root.Get("trialStartedAt")?.AsLong();
+      state.Lease = WireHelpers.ParseLease(root.Get("lease"));
 
       return state;
     }

@@ -7,6 +7,13 @@ namespace Keylight {
   public sealed class CachedState {
     public Lease?  Lease          { get; set; }
     public string? InstanceId     { get; set; }
+    /// <summary>
+    /// The activated license key. Persisted because /validate and /deactivate
+    /// both require it on the wire — without it every check-in 400s and the
+    /// client degrades to activate-only. Null on installs that activated before
+    /// this field existed, and on trial-only devices that never activated.
+    /// </summary>
+    public string? LicenseKey     { get; set; }
     public long    FetchedAt      { get; set; }
     /// <summary>
     /// Unix-second timestamp of when the trial was started on this device.
@@ -100,6 +107,16 @@ namespace Keylight {
         sb.Append('"');
       }
 
+      // licenseKey (nullable string)
+      if (state.LicenseKey != null) {
+        if (!first) sb.Append(',');
+        first = false;
+        sb.Append("\"licenseKey\":");
+        sb.Append('"');
+        JsonCodec.WriteEscapedString(sb, state.LicenseKey);
+        sb.Append('"');
+      }
+
       // fetchedAt (long)
       if (!first) sb.Append(',');
       sb.Append("\"fetchedAt\":");
@@ -121,6 +138,7 @@ namespace Keylight {
 
       var state = new CachedState();
       state.InstanceId = root.Get("instanceId")?.AsString();
+      state.LicenseKey = root.Get("licenseKey")?.AsString();
       state.FetchedAt  = root.Get("fetchedAt")?.AsLong() ?? 0;
 
       state.TrialStartedAt = root.Get("trialStartedAt")?.AsLong();

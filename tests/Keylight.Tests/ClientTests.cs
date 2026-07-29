@@ -111,7 +111,7 @@ namespace Keylight.Tests {
       // Start with an existing cached state (simulating prior activation)
       store.Save(new CachedState {
         Lease = lease,
-        InstanceId = "inst-001",
+        LicenseKey = "KL-TEST-AAAA-BBBB", InstanceId = "inst-001",
         FetchedAt = now
       });
 
