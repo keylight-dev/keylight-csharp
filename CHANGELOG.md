@@ -5,6 +5,22 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-08-01
+
+### Added
+
+- **The SDK now identifies itself on the wire.** `activate` and `validate` send
+  `sdk: "csharp"` alongside the existing `platform` field. Since 0.1.2 fixed
+  `Platform` to report canonical `macos`/`windows`/`linux` tokens, it became
+  identical to what the Rust and C++ SDKs send and could no longer indicate
+  which SDK a device was running. No API change and nothing to do in your code.
+
+### Note
+
+0.1.2 was tagged but never reached NuGet — its release run failed before
+publishing. 0.1.3 is therefore the first published package, and it contains
+everything listed under 0.1.2 below.
+
 ## [0.1.2] — 2026-07-29
 
 ### Added
