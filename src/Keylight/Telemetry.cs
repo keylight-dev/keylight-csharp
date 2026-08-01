@@ -21,6 +21,18 @@ namespace Keylight {
   internal static class Telemetry {
     internal const int VersionMax = 64;
     internal const int PlatformMax = 32;
+    internal const int SdkIdMax = 16;
+
+    /// <summary>
+    /// Identifies this SDK to the backend, sent as <c>sdk</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>Platform</c> cannot identify the SDK. Once this SDK started sending
+    /// canonical <c>macos</c>/<c>windows</c>/<c>linux</c> tokens it became
+    /// indistinguishable from the Rust and C++ SDKs, and the server labelled
+    /// every one of those devices "Rust". This field is the explicit answer.
+    /// </remarks>
+    internal const string SdkId = "csharp";
 
     /// <summary>
     /// Truncates to at most <paramref name="max"/> UTF-16 code units, never

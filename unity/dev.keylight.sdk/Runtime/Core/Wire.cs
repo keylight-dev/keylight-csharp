@@ -22,6 +22,7 @@ namespace Keylight {
         ["app_version"]   = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
         ["sdk_version"]   = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
         ["platform"]      = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
+        ["sdk"]           = Telemetry.SdkId,
         ["free_tier_instance_id"] = FreeTierInstanceId
       };
       return JsonCodec.Stringify(obj);
@@ -45,7 +46,8 @@ namespace Keylight {
         // See ActivateRequest.ToJson — clamped for the same reason.
         ["app_version"] = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
         ["sdk_version"] = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
-        ["platform"]    = Telemetry.Clamp(Platform, Telemetry.PlatformMax)
+        ["platform"]    = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
+        ["sdk"]         = Telemetry.SdkId
       };
       return JsonCodec.Stringify(obj);
     }
