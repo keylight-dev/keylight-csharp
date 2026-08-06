@@ -177,6 +177,8 @@ namespace Keylight {
         AppVersion   = _config.AppVersion,
         SdkVersion   = SdkInfo.Version,
         Platform     = _config.Platform ?? Device.Platform,
+        CpuCores     = Device.CpuCores,
+        Memory       = Device.Memory,
         SdkTrialDurationDays = _config.TrialDurationDays
       };
 
@@ -230,6 +232,8 @@ namespace Keylight {
         AppVersion = _config.AppVersion,
         SdkVersion = SdkInfo.Version,
         Platform   = _config.Platform ?? Device.Platform,
+        CpuCores   = Device.CpuCores,
+        Memory     = Device.Memory,
         SdkTrialDurationDays = _config.TrialDurationDays
       };
 

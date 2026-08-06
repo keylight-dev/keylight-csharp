@@ -22,6 +22,31 @@ namespace Keylight {
       : "unknown";
 
     /// <summary>
+    /// CPU-core BUCKET for this machine, sent as <c>cpu_cores</c> — never the
+    /// count itself. See <see cref="DeviceBuckets"/> for the cross-SDK bucket
+    /// contract and why the raw value must not cross the wire.
+    ///
+    /// <c>Environment.ProcessorCount</c> is the logical-processor count as the
+    /// runtime sees it (it honours CPU affinity and container CPU limits), which
+    /// is the right number here: it describes the machine the app can actually
+    /// use.
+    /// </summary>
+    public static string? CpuCores { get; } =
+      DeviceBuckets.BucketCpuCores(Environment.ProcessorCount);
+
+    /// <summary>
+    /// Installed-RAM BUCKET for this machine, sent as <c>memory</c> — never the
+    /// byte size. <c>null</c> when the probe could not answer (see
+    /// <see cref="PhysicalMemory"/>); the field is optional and is then omitted
+    /// rather than defaulted, because a default would misfile the device.
+    ///
+    /// Not cached in a static initializer: Unity supplies the value after
+    /// startup via <c>PhysicalMemory.SetTotalBytes</c>, and the underlying probe
+    /// caches itself anyway.
+    /// </summary>
+    public static string? Memory => DeviceBuckets.BucketMemoryBytes(PhysicalMemory.TotalBytes);
+
+    /// <summary>
     /// A human-readable instance name for the current device, sent as
     /// <c>instance_name</c> during activation (display-only; seat identity is
     /// the server-issued <c>instance_id</c>).

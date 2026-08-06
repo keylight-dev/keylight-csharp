@@ -22,6 +22,9 @@ namespace Keylight {
     internal const int VersionMax = 64;
     internal const int PlatformMax = 32;
     internal const int SdkIdMax = 16;
+    /// <summary>Cap on the device-capability buckets (<c>cpu_cores</c>,
+    /// <c>memory</c>) — <c>z.string().max(16)</c> on the worker.</summary>
+    internal const int BucketMax = 16;
 
     /// <summary>
     /// Identifies this SDK to the backend, sent as <c>sdk</c>.

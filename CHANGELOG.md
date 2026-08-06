@@ -5,6 +5,18 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Coarse device-capability telemetry.** `activate` and `validate` now also
+  send `cpu_cores` and `memory`. Both are **buckets**, never raw values —
+  `"1-2" | "3-4" | "5-8" | "9-16" | "17+"` and
+  `"<4GB" | "4-8GB" | "8-16GB" | "16-32GB" | "32-64GB" | "64GB+"` — so the exact
+  core count and RAM size never leave the device. Both fields are optional and
+  additive: `memory` is omitted entirely on platforms where installed RAM cannot
+  be read. Nothing to do in your code.
+
 ## [0.2.0] — 2026-09-05
 
 ### Added
