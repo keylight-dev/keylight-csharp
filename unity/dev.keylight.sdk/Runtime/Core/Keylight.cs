@@ -178,6 +178,8 @@ namespace Keylight {
         SdkVersion   = SdkInfo.Version,
         Platform     = _config.Platform ?? Device.Platform,
         CpuCores     = Device.CpuCores,
+        OsVersion    = Device.OsVersionValue,
+        Arch         = Device.Arch,
         Memory       = Device.Memory
       };
 
@@ -232,6 +234,8 @@ namespace Keylight {
         SdkVersion = SdkInfo.Version,
         Platform   = _config.Platform ?? Device.Platform,
         CpuCores   = Device.CpuCores,
+        OsVersion  = Device.OsVersionValue,
+        Arch       = Device.Arch,
         Memory     = Device.Memory
       };
 

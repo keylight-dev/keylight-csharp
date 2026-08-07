@@ -15,6 +15,10 @@ namespace Keylight {
     public string? CpuCores { get; set; }
     /// <summary>RAM bucket ("&lt;4GB" … "64GB+"); optional, never a byte size.</summary>
     public string? Memory { get; set; }
+    /// <summary>Dotted-numeric host OS release; omitted when unreadable.</summary>
+    public string? OsVersion { get; set; }
+    /// <summary>Canonical CPU architecture (arm64 / x86_64); omitted otherwise.</summary>
+    public string? Arch { get; set; }
     public string? FreeTierInstanceId { get; set; }
     /// <summary>
     /// The trial length this build was <b>configured</b> with — the seed, not the
@@ -39,6 +43,10 @@ namespace Keylight {
         // and an older worker ignores the keys entirely.
         ["cpu_cores"]     = Telemetry.Clamp(CpuCores, Telemetry.BucketMax),
         ["memory"]        = Telemetry.Clamp(Memory, Telemetry.BucketMax),
+        // Device dimensions. This SDK was the only one sending neither, so C#
+        // apps contributed nothing to two breakdowns everyone else populates.
+        ["os_version"]    = Telemetry.Clamp(OsVersion, Telemetry.OsVersionMax),
+        ["arch"]          = Telemetry.Clamp(Arch, Telemetry.ArchMax),
         ["free_tier_instance_id"] = FreeTierInstanceId,
         ["sdk_trial_duration_days"] = SdkTrialDurationDays
       };
@@ -59,6 +67,10 @@ namespace Keylight {
     public string? CpuCores { get; set; }
     /// <summary>RAM bucket ("&lt;4GB" … "64GB+"); optional, never a byte size.</summary>
     public string? Memory { get; set; }
+    /// <summary>See ActivateRequest.</summary>
+    public string? OsVersion { get; set; }
+    /// <summary>See ActivateRequest.</summary>
+    public string? Arch { get; set; }
     /// <summary>
     /// The trial length this build was <b>configured</b> with — the seed, not the
     /// effective value. Echoing the server's own number back diagnoses nothing;
@@ -80,6 +92,9 @@ namespace Keylight {
         // See ActivateRequest.ToJson — same optional device-capability buckets.
         ["cpu_cores"]   = Telemetry.Clamp(CpuCores, Telemetry.BucketMax),
         ["memory"]      = Telemetry.Clamp(Memory, Telemetry.BucketMax),
+        // See ActivateRequest.ToJson.
+        ["os_version"]  = Telemetry.Clamp(OsVersion, Telemetry.OsVersionMax),
+        ["arch"]        = Telemetry.Clamp(Arch, Telemetry.ArchMax),
         ["sdk_trial_duration_days"] = SdkTrialDurationDays
       };
       return JsonCodec.Stringify(obj);

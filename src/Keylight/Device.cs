@@ -47,6 +47,30 @@ namespace Keylight {
     public static string? Memory => DeviceBuckets.BucketMemoryBytes(PhysicalMemory.TotalBytes);
 
     /// <summary>
+    /// Host OS release as a dotted-numeric string, sent as <c>os_version</c>,
+    /// or <c>null</c> when it cannot be read cleanly. See
+    /// <see cref="OsVersion"/> for why macOS does not use
+    /// <c>Environment.OSVersion</c>.
+    /// </summary>
+    public static string? OsVersionValue => OsVersion.Value;
+
+    /// <summary>
+    /// CPU architecture as the canonical token the other SDKs send, or
+    /// <c>null</c>. Only the two families the worker allow-lists are ever sent:
+    /// 32-bit and exotic ISAs would be nulled server-side anyway, so they are
+    /// omitted at the source rather than shipped as junk.
+    ///
+    /// <c>ProcessArchitecture</c>, not <c>OSArchitecture</c> — parity with the
+    /// Rust and JS SDKs, which report the architecture the process is actually
+    /// running as. An x64 process under Rosetta on an arm64 Mac is an x86_64
+    /// install, and that is the honest answer for a compatibility breakdown.
+    /// </summary>
+    public static string? Arch { get; } =
+      RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64"
+      : RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "x86_64"
+      : null;
+
+    /// <summary>
     /// A human-readable instance name for the current device, sent as
     /// <c>instance_name</c> during activation (display-only; seat identity is
     /// the server-issued <c>instance_id</c>).
