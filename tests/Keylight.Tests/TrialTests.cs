@@ -153,12 +153,27 @@ namespace Keylight.Tests {
 
       await client.CheckOnLaunchAsync();
 
+      // The user gets no trial: that is the property that matters, and it is
+      // unchanged.
       Assert.Equal(KeylightState.Invalid, client.State);
 
-      // Store must NOT have a TrialStartedAt set
+      // INVERTED in the server-owned-trial change, deliberately.
+      //
+      // This assertion used to read "the store must NOT have a TrialStartedAt".
+      // That was right when the trial length was compiled in: no duration meant
+      // no trial, ever, so a stamp was pure noise.
+      //
+      // It is wrong now. The duration is the server's, and an effective 0 is
+      // indistinguishable from "the config has not arrived yet" — so refusing to
+      // stamp leaves a later-arriving duration nothing to measure from, and a
+      // tenant who enables a trial in the dashboard finds it does nothing for
+      // every install that launched first. The clock is therefore stamped
+      // unconditionally, and the stamp grants nothing on its own: the state
+      // assertion above is what enforces that.
       var saved = store.Load();
-      // store.Load() may be null (no lease, no state was written)
-      Assert.True(saved == null || !saved.TrialStartedAt.HasValue);
+      Assert.NotNull(saved);
+      Assert.True(saved!.TrialStartedAt.HasValue,
+        "the clock must be stamped even when no trial is on offer, or a later-arriving duration has nothing to measure");
     }
 
     [Fact]

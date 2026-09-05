@@ -176,7 +176,8 @@ namespace Keylight {
         InstanceName = Device.DefaultInstanceName,
         AppVersion   = _config.AppVersion,
         SdkVersion   = SdkInfo.Version,
-        Platform     = _config.Platform ?? Device.Platform
+        Platform     = _config.Platform ?? Device.Platform,
+        SdkTrialDurationDays = _config.TrialDurationDays
       };
 
       ActivateResponse resp;
@@ -228,7 +229,8 @@ namespace Keylight {
         InstanceId = instanceId,
         AppVersion = _config.AppVersion,
         SdkVersion = SdkInfo.Version,
-        Platform   = _config.Platform ?? Device.Platform
+        Platform   = _config.Platform ?? Device.Platform,
+        SdkTrialDurationDays = _config.TrialDurationDays
       };
 
       ValidateResponse resp;
@@ -263,7 +265,12 @@ namespace Keylight {
           // Carry the key forward: every future check-in needs it on the wire.
           LicenseKey     = cached?.LicenseKey,
           FetchedAt      = _nowSeconds(),
-          TrialStartedAt = cached?.TrialStartedAt
+          TrialStartedAt = cached?.TrialStartedAt,
+          // Carry the server-owned settings forward. This type is rebuilt from
+          // scratch rather than mutated, so a field omitted here is a field
+          // silently reset to the seed on the next validate.
+          ProductTrialDurationDays = cached?.ProductTrialDurationDays,
+          ProductFreeTierEnabled   = cached?.ProductFreeTierEnabled
         };
         _store.Save(newState);
         RefreshCache();
@@ -282,7 +289,12 @@ namespace Keylight {
           // Carry the key forward: every future check-in needs it on the wire.
           LicenseKey     = cached?.LicenseKey,
           FetchedAt      = _nowSeconds(),
-          TrialStartedAt = cached?.TrialStartedAt
+          TrialStartedAt = cached?.TrialStartedAt,
+          // Carry the server-owned settings forward. This type is rebuilt from
+          // scratch rather than mutated, so a field omitted here is a field
+          // silently reset to the seed on the next validate.
+          ProductTrialDurationDays = cached?.ProductTrialDurationDays,
+          ProductFreeTierEnabled   = cached?.ProductFreeTierEnabled
         };
         _store.Save(newState);
         RefreshCache();
@@ -290,6 +302,12 @@ namespace Keylight {
       // resp.Valid == true && resp.Lease == null: the server confirmed
       // validity without sending a refreshed lease. Nothing to persist —
       // the existing cached lease remains authoritative.
+
+      // The server-owned settings ride on this response. Absorbed after the
+      // branches above so it merges into whatever they just wrote, and
+      // unconditionally: the settings are valid regardless of whether the
+      // licence itself validated.
+      AbsorbConfigFields(resp.ConfigFields);
     }
 
     /// <summary>
@@ -405,22 +423,95 @@ namespace Keylight {
       // _store.Save → RefreshCache), so _cachedState reflects the latest
       // state after it returns.
 
-      // Auto-start trial: once, idempotent, only when no trusted active license
-      // and TrialDurationDays is configured.
-      if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
-        var trusted = GetCachedTrustedLease();
-        bool hasActiveLicense = trusted != null && trusted.Status == "active";
+      var trusted = GetCachedTrustedLease();
+      bool hasActiveLicense = trusted != null && trusted.Status == "active";
 
-        if (!hasActiveLicense) {
-          // Use the cached state; fall back to a fresh CachedState for first launch.
-          var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
-          if (!current.TrialStartedAt.HasValue) {
-            current.TrialStartedAt = _nowSeconds();
-            _store.Save(current);
-            RefreshCache();
-          }
+      if (!hasActiveLicense) {
+        // An unlicensed install makes no other call that could carry the
+        // server-owned settings. The other SDKs get them free on the keyless
+        // beacon; this one has no beacon, so /config is the only route that
+        // reaches a trial user — without this fetch the dashboard setting would
+        // never reach exactly the population it is for. Licensed installs skip
+        // it: ValidateAsync above already carried the settings.
+        await FetchConfigAsync(ct).ConfigureAwait(false);
+
+        // Auto-start the trial: once, idempotent, and UNCONDITIONALLY — note
+        // there is no `duration > 0` guard here, deliberately.
+        //
+        // Once the duration is server-owned, 0 is indistinguishable from "the
+        // config has not arrived yet", so skipping the stamp leaves a
+        // later-arriving duration nothing to measure from and the user never
+        // gets the trial their tenant enabled. The stamp grants nothing on its
+        // own: CheckTrialOrInvalid still reports Invalid while the effective
+        // duration is 0.
+        //
+        // An existing stamp is never overwritten, so enabling a trial months
+        // after an install does not hand it a fresh window — otherwise it would
+        // be farmable by reinstalling.
+        var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
+        if (!current.TrialStartedAt.HasValue) {
+          current.TrialStartedAt = _nowSeconds();
+          _store.Save(current);
+          RefreshCache();
         }
       }
+    }
+
+    // ─── server-owned product config ─────────────────────────────────────────
+
+    /// <summary>
+    /// Trial length actually in force, in days: server value → local seed → 0.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="KeylightConfig.TrialDurationDays"/> is demoted to a <i>seed</i>,
+    /// used only before this install has ever heard from the server. It is
+    /// deliberately not removed: a brand-new install genuinely has nothing else,
+    /// and dropping it would make first-launch behaviour depend on the network.
+    /// </remarks>
+    public int EffectiveTrialDurationDays() {
+      var cached = Cached()?.ProductTrialDurationDays;
+      if (cached.HasValue) return cached.Value;
+      return _config.TrialDurationDays ?? 0;
+    }
+
+    /// <summary>
+    /// Explicitly refresh the product config from <c>GET /{tenant}/{product}/config</c>.
+    /// Never throws.
+    /// </summary>
+    /// <remarks>
+    /// A no-op when the transport does not implement
+    /// <see cref="IKeylightConfigTransport"/>. Failures are swallowed: a refresh
+    /// that cannot reach the network leaves the last known settings in place
+    /// rather than falling back to the seed.
+    /// </remarks>
+    public async Task FetchConfigAsync(CancellationToken ct = default) {
+      if (_transport is not IKeylightConfigTransport configTransport) return;
+      try {
+        var resp = await configTransport.FetchConfigAsync(ct).ConfigureAwait(false);
+        if (resp != null) AbsorbConfigFields(resp.ConfigFields);
+      } catch {
+        // Best-effort: keep the cached settings.
+      }
+    }
+
+    /// <summary>
+    /// Merge server-sent settings into the cache, <b>field by field</b>.
+    /// </summary>
+    /// <remarks>
+    /// A response carrying neither field leaves the cache untouched — an older
+    /// worker that knows nothing about these settings must not wipe what this
+    /// install already learned. Each field is written only when the server
+    /// actually sent it, rather than overwriting the pair.
+    /// </remarks>
+    internal void AbsorbConfigFields(ProductConfigFields fields) {
+      if (fields == null || fields.IsEmpty) return;
+      var current = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+      if (fields.TrialDurationDays.HasValue)
+        current.ProductTrialDurationDays = fields.TrialDurationDays;
+      if (fields.FreeTierEnabled.HasValue)
+        current.ProductFreeTierEnabled = fields.FreeTierEnabled;
+      _store.Save(current);
+      RefreshCache();
     }
 
     // ─── public API — sync wrappers ──────────────────────────────────────────
@@ -535,10 +626,11 @@ namespace Keylight {
     }
 
     private KeylightState CheckTrialOrInvalid() {
-      if (_config.TrialDurationDays.HasValue && _config.TrialDurationDays.Value > 0) {
+      var duration = EffectiveTrialDurationDays();
+      if (duration > 0) {
         var trialStartedAt = Cached()?.TrialStartedAt;
         if (trialStartedAt.HasValue) {
-          var trialEndSeconds = trialStartedAt.Value + (long)_config.TrialDurationDays.Value * 86400L;
+          var trialEndSeconds = trialStartedAt.Value + (long)duration * 86400L;
           return _nowSeconds() < trialEndSeconds
             ? KeylightState.Trial
             : KeylightState.Expired;

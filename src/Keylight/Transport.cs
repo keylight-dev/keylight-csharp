@@ -10,13 +10,31 @@ namespace Keylight {
     Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default);
     Task<ValidateResponse> ValidateAsync(ValidateRequest req, CancellationToken ct = default);
     Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default);
+
+  }
+
+  /// <summary>
+  /// Optional transport capability: <c>GET {baseUrl}/{tenant}/{product}/config</c>,
+  /// the server-owned trial length and free-tier flag.
+  /// </summary>
+  /// <remarks>
+  /// A separate interface rather than a member on <see cref="IKeylightTransport"/>
+  /// so the addition is non-breaking: existing custom transports and test doubles
+  /// keep compiling untouched. A default interface method would have been the
+  /// tidier shape, but this assembly also targets netstandard2.0 (Unity), whose
+  /// runtime cannot dispatch one. The client probes with a type test and simply
+  /// skips the fetch when the transport does not implement this — leaving the
+  /// cached settings in place rather than falling back to the seed.
+  /// </remarks>
+  public interface IKeylightConfigTransport {
+    Task<ConfigResponse?> FetchConfigAsync(CancellationToken ct = default);
   }
 
   /// <summary>
   /// Default transport that POSTs JSON to the Keylight API using <see cref="HttpClient"/>.
   /// URL pattern: <c>{baseUrl}/{tenantId}/{productId}/{action}</c>.
   /// </summary>
-  public sealed class HttpClientTransport : IKeylightTransport {
+  public sealed class HttpClientTransport : IKeylightTransport, IKeylightConfigTransport {
     private readonly string _baseUrl;
     private readonly string _tenantId;
     private readonly string _productId;
@@ -82,6 +100,14 @@ namespace Keylight {
       using var request = BuildRequest("deactivate", req.ToJson());
       var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
       await ReadBodyAsync(response, ct).ConfigureAwait(false);
+    }
+
+    public async Task<ConfigResponse?> FetchConfigAsync(CancellationToken ct = default) {
+      using var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl("config"));
+      request.Headers.Add("X-Keylight-SDK-Key", _sdkKey);
+      var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+      var body = await ReadBodyAsync(response, ct).ConfigureAwait(false);
+      return ConfigResponse.Parse(body);
     }
 
     public void Dispose() {
