@@ -5,6 +5,79 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The trial length is the server's, not the build's.** A tenant could set a
+  trial length in the dashboard and nothing happened to their C# app:
+  `KeylightConfig.TrialDurationDays` was read directly wherever a trial decision
+  was made, so the value compiled into the build was the only one that ever
+  applied. New `KeylightClient.EffectiveTrialDurationDays()` resolves **server
+  value → local seed → 0**, and state resolution reads it. The config value
+  stays a *seed*, deliberately: a brand-new install genuinely has nothing else,
+  and removing it would make first-launch behaviour depend on the network.
+- **`KeylightClient.FetchConfigAsync()`** reads `GET /{tenant}/{product}/config`,
+  and never throws. `CheckOnLaunchAsync` calls it **only when there is no active
+  license**. This is a deliberate divergence from the other SDKs, which absorb
+  the settings from the keyless beacon: this SDK has no beacon, so `/config` is
+  the only route that ever reaches a trial user. Licensed installs skip it —
+  `ValidateAsync` already carries the settings on a call it was making anyway.
+- **The settings ride on `validate` too.** `ValidateResponse` now carries
+  `trial_duration_days` and `free_tier_enabled`, absorbed regardless of whether
+  the licence itself validated.
+- **`sdk_trial_duration_days` on activate and validate** — the length the build
+  was *configured* with, not the effective one, since echoing the server's own
+  number back diagnoses nothing. Omitted entirely when unconfigured, rather than
+  sent as a misleading `0`. Diagnostic only: the server must never gate on it,
+  because a patched client sends whatever its author wants.
+- **`IKeylightConfigTransport`**, an optional capability interface implemented by
+  `HttpClientTransport`. Separate from `IKeylightTransport` so the addition is
+  non-breaking — existing custom transports keep compiling, and the client skips
+  the fetch when a transport does not implement it. A default interface method
+  would have been tidier, but this assembly also targets netstandard2.0 (Unity),
+  whose runtime cannot dispatch one.
+
+### Fixed
+
+- **The trial clock is now stamped even when no trial is on offer.**
+  `CheckOnLaunchAsync` only persisted `TrialStartedAt` when `TrialDurationDays`
+  was configured and above zero. Once the duration is server-owned, `0` is
+  indistinguishable from "the config has not arrived yet", so that guard left no
+  start timestamp for a later-arriving duration to measure — a tenant enabling a
+  trial in the dashboard would find it did nothing for every install that had
+  already launched. The stamp grants nothing on its own: state still resolves to
+  `Invalid` while the effective duration is 0. An existing stamp is never
+  overwritten, so enabling a trial 60 days after an install does not hand it a
+  fresh window.
+- **`0` is a real setting and absence is not zero.** `CachedState` stores the
+  pair as nullables, written to the state file only when present, and merged
+  field by field — so a worker that sends neither field leaves what the install
+  already learned alone, a server `0` survives a relaunch as `0` rather than
+  falling back to the seed, and `free_tier_enabled: false` is not mistaken for
+  "never heard".
+- **`ValidateAsync` no longer resets the cached settings.** It rebuilds
+  `CachedState` from scratch on two paths, so the new fields are explicitly
+  carried forward; a field omitted from that rebuild is a field silently reset
+  to the seed on the next validate.
+
+### Changed
+
+- `TrialTests.No_TrialDurationDays_and_no_license_gives_Invalid` **inverts** its
+  storage assertion. It used to require that no `TrialStartedAt` was written,
+  which was right when the duration was compiled in and is wrong now. The
+  user-visible property it also asserts — that the state is `Invalid` — is
+  unchanged, and is what enforces "the stamp grants nothing".
+
+### Notes
+
+- `free_tier_enabled` is persisted for wire parity and so a later port inherits
+  the plumbing, but is **currently unread**: this SDK has no free-tier state
+  (`KeylightState` has no `FreeTier` member) and no keyless beacon.
+- 94 → 111 tests.
+- Ports the contract shipped in `keylight-cpp` 0.2.0/0.2.1; see that repo's
+  `docs/superpowers/specs/2026-09-05-trial-parity-handoff.md`.
+
 ## [0.1.3] — 2026-08-01
 
 ### Added

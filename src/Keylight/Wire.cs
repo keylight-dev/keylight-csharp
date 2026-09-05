@@ -12,6 +12,14 @@ namespace Keylight {
     public string? SdkVersion { get; set; }
     public string? Platform { get; set; }
     public string? FreeTierInstanceId { get; set; }
+    /// <summary>
+    /// The trial length this build was <b>configured</b> with — the seed, not the
+    /// effective value. Echoing the server's own number back diagnoses nothing;
+    /// the seed catches the ordinary mistake of a 30-day build running against a
+    /// 14-day dashboard setting. Diagnostic only: the server must never gate on
+    /// it, because a patched client sends whatever its author wants.
+    /// </summary>
+    public int? SdkTrialDurationDays { get; set; }
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
@@ -23,7 +31,8 @@ namespace Keylight {
         ["sdk_version"]   = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
         ["platform"]      = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
         ["sdk"]           = Telemetry.SdkId,
-        ["free_tier_instance_id"] = FreeTierInstanceId
+        ["free_tier_instance_id"] = FreeTierInstanceId,
+        ["sdk_trial_duration_days"] = SdkTrialDurationDays
       };
       return JsonCodec.Stringify(obj);
     }
@@ -38,6 +47,14 @@ namespace Keylight {
     public string? AppVersion { get; set; }
     public string? SdkVersion { get; set; }
     public string? Platform { get; set; }
+    /// <summary>
+    /// The trial length this build was <b>configured</b> with — the seed, not the
+    /// effective value. Echoing the server's own number back diagnoses nothing;
+    /// the seed catches the ordinary mistake of a 30-day build running against a
+    /// 14-day dashboard setting. Diagnostic only: the server must never gate on
+    /// it, because a patched client sends whatever its author wants.
+    /// </summary>
+    public int? SdkTrialDurationDays { get; set; }
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
@@ -47,7 +64,8 @@ namespace Keylight {
         ["app_version"] = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
         ["sdk_version"] = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
         ["platform"]    = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
-        ["sdk"]         = Telemetry.SdkId
+        ["sdk"]         = Telemetry.SdkId,
+        ["sdk_trial_duration_days"] = SdkTrialDurationDays
       };
       return JsonCodec.Stringify(obj);
     }
@@ -93,6 +111,16 @@ namespace Keylight {
     public long? LicenseExpiresAt { get; set; }
     public Lease? Lease { get; set; }
     public string? Error { get; set; }
+    /// <summary>Server-owned trial length, riding on a call the SDK already
+    /// makes. Null when the worker predates the setting — which is not the same
+    /// as 0. See <see cref="ProductConfigFields"/>.</summary>
+    public int? TrialDurationDays { get; set; }
+    /// <summary>Server-owned free-tier flag. See <see cref="ProductConfigFields"/>.</summary>
+    public bool? FreeTierEnabled { get; set; }
+
+    /// <summary>The two settings, extracted for the client's merge step.</summary>
+    public ProductConfigFields ConfigFields =>
+      new ProductConfigFields { TrialDurationDays = TrialDurationDays, FreeTierEnabled = FreeTierEnabled };
 
     internal static ValidateResponse? Parse(string json) {
       var root = JsonCodec.Parse(json);
@@ -102,11 +130,70 @@ namespace Keylight {
       resp.LicenseExpiresAt = root.Get("license_expires_at")?.AsLong();
       resp.Lease = WireHelpers.ParseLease(root.Get("lease"));
       resp.Error = root.Get("error")?.AsString();
+      WireHelpers.ReadConfigFields(root, out var days, out var freeTier);
+      resp.TrialDurationDays = days;
+      resp.FreeTierEnabled = freeTier;
+      return resp;
+    }
+  }
+
+  /// <summary>
+  /// The two product settings the server owns, as they appear on the
+  /// <c>/config</c> response and riding on <c>/validate</c>.
+  /// </summary>
+  /// <remarks>
+  /// Both are nullable and <b>absence is meaningful</b>: null means "this install
+  /// has never heard a value from the server", which is a different thing from 0
+  /// or false. A tenant who turns trials off sends a real 0; collapsing that into
+  /// "absent" would fall back to the compiled-in seed and silently re-enable the
+  /// trial they just disabled.
+  /// </remarks>
+  public sealed class ProductConfigFields {
+    public int? TrialDurationDays { get; set; }
+    public bool? FreeTierEnabled { get; set; }
+
+    /// <summary>True when the response carried neither setting — an older worker,
+    /// which must leave a cached value alone rather than overwrite it.</summary>
+    public bool IsEmpty => !TrialDurationDays.HasValue && !FreeTierEnabled.HasValue;
+  }
+
+  /// <summary>Response body from the <c>GET /config</c> endpoint.</summary>
+  /// <remarks>
+  /// The signature fields (<c>issued_at</c>, <c>expires_at</c>, <c>kid</c>,
+  /// <c>signature</c>) are part of the frozen wire contract but are not verified
+  /// by this SDK yet — they are accepted and ignored so that adding verification
+  /// later is a change to this file alone.
+  /// </remarks>
+  public sealed class ConfigResponse {
+    public int? TrialDurationDays { get; set; }
+    public bool? FreeTierEnabled { get; set; }
+
+    public ProductConfigFields ConfigFields =>
+      new ProductConfigFields { TrialDurationDays = TrialDurationDays, FreeTierEnabled = FreeTierEnabled };
+
+    internal static ConfigResponse? Parse(string json) {
+      var root = JsonCodec.Parse(json);
+      if (root == null) return null;
+      var resp = new ConfigResponse();
+      WireHelpers.ReadConfigFields(root, out var days, out var freeTier);
+      resp.TrialDurationDays = days;
+      resp.FreeTierEnabled = freeTier;
       return resp;
     }
   }
 
   internal static class WireHelpers {
+    /// <summary>
+    /// Read the two server-owned settings off any response body, leaving both
+    /// null when the key is absent. Deliberately not defaulted to 0/false: the
+    /// caller relies on null to mean "the worker said nothing".
+    /// </summary>
+    internal static void ReadConfigFields(JsonValue root, out int? trialDurationDays, out bool? freeTierEnabled) {
+      var days = root.Get("trial_duration_days")?.AsLong();
+      trialDurationDays = days.HasValue ? (int)days.Value : (int?)null;
+      freeTierEnabled = root.Get("free_tier_enabled")?.AsBool();
+    }
+
     /// <summary>
     /// Parse a Lease from a JsonValue node.
     /// Reads camelCase keys as they come from the server.

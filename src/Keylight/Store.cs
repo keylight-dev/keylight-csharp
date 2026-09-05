@@ -22,6 +22,25 @@ namespace Keylight {
     /// Once set it is never reset (idempotent trial start).
     /// </summary>
     public long?   TrialStartedAt { get; set; }
+    /// <summary>
+    /// Trial length last heard from the server, in days. Cached so an offline
+    /// launch uses the tenant's real setting rather than the compiled-in seed.
+    /// <para>
+    /// <b>Null means "never heard from the server", which is not the same as 0.</b>
+    /// A tenant who turns trials off in the dashboard sends a real 0; collapsing
+    /// that into "absent" would fall back to the seed and silently re-enable the
+    /// trial they just disabled. Nullable for exactly that reason — do not
+    /// replace it with an int and a sentinel.
+    /// </para>
+    /// </summary>
+    public int?    ProductTrialDurationDays { get; set; }
+    /// <summary>
+    /// Free-tier flag last heard from the server. Persisted for wire parity with
+    /// the other SDKs and so a later free-tier port inherits the plumbing, but
+    /// <b>currently unread</b>: this SDK has no free-tier state
+    /// (<see cref="KeylightState"/> has no FreeTier member) and no keyless beacon.
+    /// </summary>
+    public bool?   ProductFreeTierEnabled { get; set; }
   }
 
   /// <summary>Pluggable storage backend for the cached lease state.</summary>
@@ -128,6 +147,18 @@ namespace Keylight {
         sb.Append(state.TrialStartedAt.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
       }
 
+      // Server-owned product settings. Written only when present: a missing key
+      // round-trips back to null, which is what preserves the absent-vs-zero
+      // distinction the whole feature turns on.
+      if (state.ProductTrialDurationDays.HasValue) {
+        sb.Append(",\"productTrialDurationDays\":");
+        sb.Append(state.ProductTrialDurationDays.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      }
+      if (state.ProductFreeTierEnabled.HasValue) {
+        sb.Append(",\"productFreeTierEnabled\":");
+        sb.Append(state.ProductFreeTierEnabled.Value ? "true" : "false");
+      }
+
       sb.Append('}');
       return sb.ToString();
     }
@@ -142,6 +173,9 @@ namespace Keylight {
       state.FetchedAt  = root.Get("fetchedAt")?.AsLong() ?? 0;
 
       state.TrialStartedAt = root.Get("trialStartedAt")?.AsLong();
+      var cachedDays = root.Get("productTrialDurationDays")?.AsLong();
+      state.ProductTrialDurationDays = cachedDays.HasValue ? (int)cachedDays.Value : (int?)null;
+      state.ProductFreeTierEnabled = root.Get("productFreeTierEnabled")?.AsBool();
       state.Lease = WireHelpers.ParseLease(root.Get("lease"));
 
       return state;
