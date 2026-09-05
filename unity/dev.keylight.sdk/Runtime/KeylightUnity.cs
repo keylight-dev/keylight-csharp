@@ -41,6 +41,15 @@ namespace Keylight.Unity {
       KeylightConfig config,
       string leaseFilename = "keylight-lease.json") {
 
+      // The core's physical-memory probe is compiled out under Unity: WebGL has
+      // no native interop and iOS IL2CPP needs DllImport("__Internal"), so
+      // keeping Runtime/Core free of native calls is worth more than a
+      // telemetry field. SystemInfo is Unity's own cross-platform answer and
+      // works on every build target, so feed it in here instead. It reports
+      // whole megabytes; the core buckets the byte count.
+      if (SystemInfo.systemMemorySize > 0)
+        PhysicalMemory.SetTotalBytes((long)SystemInfo.systemMemorySize * 1024L * 1024L);
+
       var store     = new UnityLeaseStore(leaseFilename);
       var transport = new UnityWebRequestTransport(config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       return new KeylightClient(config, store, transport);

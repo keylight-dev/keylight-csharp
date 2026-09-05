@@ -22,6 +22,16 @@ namespace Keylight {
     internal const int VersionMax = 64;
     internal const int PlatformMax = 32;
     internal const int SdkIdMax = 16;
+    /// <summary>Cap on the device-capability buckets (<c>cpu_cores</c>,
+    /// <c>memory</c>) — <c>z.string().max(16)</c> on the worker.</summary>
+    internal const int BucketMax = 16;
+    /// <summary>Cap on <c>os_version</c> — <c>z.string().max(32)</c> on the
+    /// worker. Wider than the buckets because a dotted version is longer than
+    /// any bucket label.</summary>
+    internal const int OsVersionMax = 32;
+    /// <summary>Cap on <c>arch</c>. The worker allow-lists the value anyway, so
+    /// this only stops an over-long string reaching it.</summary>
+    internal const int ArchMax = 16;
 
     /// <summary>
     /// Identifies this SDK to the backend, sent as <c>sdk</c>.

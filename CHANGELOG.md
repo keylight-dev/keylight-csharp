@@ -5,6 +5,32 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`os_version` and `arch` on `activate` and `validate`.** This SDK was the only
+  one of the five sending neither, so C# apps contributed nothing to two
+  breakdowns every other SDK populates. `arch` is a canonical `arm64` /
+  `x86_64` token (anything else is omitted rather than sent as junk, since the
+  server allow-lists it); `os_version` is the dotted-numeric release.
+
+  On macOS this is the **marketing** version from `sw_vers` (`15.5`), not
+  `Environment.OSVersion`, which returns the Darwin kernel version (`24.5.0`) —
+  a different vocabulary from the one the Swift and Rust SDKs send, which would
+  split one macOS release across two families of bucket in the same breakdown.
+  Windows uses the OS build; Linux the kernel release, matching Rust. Anything
+  unreadable is omitted: the fields are optional, and a wrong-vocabulary value
+  mints a phantom bucket that looks like a real release. No app code changes.
+
+- **Coarse device-capability telemetry.** `activate` and `validate` now also
+  send `cpu_cores` and `memory`. Both are **buckets**, never raw values —
+  `"1-2" | "3-4" | "5-8" | "9-16" | "17+"` and
+  `"<4GB" | "4-8GB" | "8-16GB" | "16-32GB" | "32-64GB" | "64GB+"` — so the exact
+  core count and RAM size never leave the device. Both fields are optional and
+  additive: `memory` is omitted entirely on platforms where installed RAM cannot
+  be read. Nothing to do in your code.
+
 ## [0.2.0] — 2026-09-05
 
 ### Added
