@@ -13,6 +13,25 @@ namespace Keylight {
     public string BaseUrl { get; }
     public string? AppVersion { get; }
     public string? Platform { get; }
+    /// <summary>
+    /// Require server-owned product settings to carry a valid Ed25519 signature
+    /// before they are cached. Defaults to <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Off by default on purpose: the worker signs a product's settings only
+    /// once that product has a trial length configured, and every other product
+    /// is served unsigned. Turning this on for one of those would reject
+    /// legitimate responses and pin the install to its compiled-in seed.
+    ///
+    /// Trust is rooted in <see cref="TrustedKeys"/>, which you compile into the
+    /// app. The SDK deliberately does not fetch a keyset at runtime — keys
+    /// fetched over the same channel that serves the config would let anyone
+    /// able to forge one forge the other. <see cref="Keyset.FetchAsync"/> exists
+    /// for bootstrapping and samples, not as a trust root. The cost is that
+    /// rotating to a new kid leaves shipped builds on their last cached settings
+    /// until they update: a freeze, not a failure.
+    /// </remarks>
+    public bool RequireSignedConfig { get; }
 
     private KeylightConfig(
       string tenantId,
@@ -24,7 +43,8 @@ namespace Keylight {
       int? trialDurationDays,
       string baseUrl,
       string? appVersion,
-      string? platform)
+      string? platform,
+      bool requireSignedConfig)
     {
       TenantId = tenantId;
       ProductId = productId;
@@ -36,6 +56,7 @@ namespace Keylight {
       BaseUrl = baseUrl;
       AppVersion = appVersion;
       Platform = platform;
+      RequireSignedConfig = requireSignedConfig;
     }
 
     public static ConfigBuilder Builder(string tenantId, string productId, string sdkKey)
@@ -52,6 +73,7 @@ namespace Keylight {
       private string _baseUrl = "https://api.keylight.dev";
       private string? _appVersion;
       private string? _platform;
+      private bool _requireSignedConfig;
 
       internal ConfigBuilder(string tenantId, string productId, string sdkKey) {
         _tenantId = tenantId;
@@ -61,6 +83,16 @@ namespace Keylight {
 
       public ConfigBuilder TrustedKeys(IDictionary<string, string> keys) {
         _trustedKeys = new Dictionary<string, string>(keys);
+        return this;
+      }
+
+      /// <summary>
+      /// Reject server-owned settings that do not carry a valid signature. See
+      /// <see cref="KeylightConfig.RequireSignedConfig"/> before enabling it —
+      /// the worker only signs products that have a trial length configured.
+      /// </summary>
+      public ConfigBuilder RequireSignedConfig(bool require = true) {
+        _requireSignedConfig = require;
         return this;
       }
 
@@ -111,6 +143,7 @@ namespace Keylight {
           keyPrefix: _keyPrefix,
           trialDurationDays: _trialDurationDays,
           baseUrl: _baseUrl,
+          requireSignedConfig: _requireSignedConfig,
           appVersion: _appVersion,
           platform: _platform
         );

@@ -1,0 +1,35 @@
+using System;
+
+namespace Keylight {
+
+  /// <summary>
+  /// The signature envelope that rides alongside server-owned product settings
+  /// on <c>/config</c>, <c>/validate</c>, and the keyless beacon.
+  /// </summary>
+  /// <remarks>
+  /// All four fields arrive together or not at all — a worker that predates
+  /// signing sends none of them. Absence therefore means "unsigned", not
+  /// "malformed".
+  /// </remarks>
+  public sealed class ConfigSignature {
+    public long IssuedAt { get; set; }
+    public long ExpiresAt { get; set; }
+    public string Kid { get; set; } = "";
+    public string Signature { get; set; } = "";
+  }
+
+  /// <summary>The canonical preimage for a signed product config.</summary>
+  /// <remarks>
+  /// Frozen across every SDK. Once a verifying client is in the wild these bytes
+  /// cannot change: every shipped client would reject valid configs, and it
+  /// cannot be fixed from the server. <c>freeTierEnabled</c> is the literal
+  /// <c>true</c>/<c>false</c>.
+  /// </remarks>
+  public static class ConfigPayload {
+    public static string Canonical(
+        string kid, string tenantId, string productId,
+        long issuedAt, long expiresAt, int trialDurationDays, bool freeTierEnabled) =>
+      $"cfg1|{kid}|{tenantId}|{productId}|{issuedAt}|{expiresAt}|{trialDurationDays}|"
+        + (freeTierEnabled ? "true" : "false");
+  }
+}
