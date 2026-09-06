@@ -5,6 +5,38 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-09-06
+
+### Added
+
+- **`RequireSignedConfig` — Ed25519 verification of server-owned product
+  settings.** The worker has signed the trial length and free-tier flag on every
+  route that delivers them since 2026-09-06; nothing on the client checked those
+  signatures. `Verifier.VerifyConfig` now does, over the frozen cross-SDK
+  payload `cfg1|kid|tenant|product|issuedAt|expiresAt|days|freeTier`.
+
+  **Off by default, and it should stay off unless you know your product is
+  signed.** The worker signs a product's settings only once that product has a
+  trial length configured in the dashboard; everything else is served unsigned,
+  and enabling this against an unsigned product would reject legitimate
+  responses and pin the install to its compiled-in seed.
+
+  When enabled, a config that does not verify is never cached — the SDK falls
+  back to your seed value, never to what the server claimed. The check lives at
+  the single point where settings are merged, so neither `/config` nor
+  `validate` can be used to write settings around it.
+
+  Trust is rooted in the `TrustedKeys` you compile in. The SDK does not fetch a
+  keyset at runtime: keys fetched over the same channel that serves the config
+  would let anyone able to forge one forge the other. `Keyset.FetchAsync`
+  remains a bootstrapping convenience, not a trust root. The trade-off is that
+  rotating to a new `kid` leaves already-shipped builds on their last cached
+  settings until they update — a freeze, not a failure.
+
+  Verification is pinned by a golden vector captured from the live worker, the
+  same one the Swift SDK pins, so both are proven to agree with production and
+  with each other.
+
 ## [0.3.0] — 2026-09-05
 
 ### Added
