@@ -152,6 +152,12 @@ namespace Keylight {
     public ProductConfigFields ConfigFields =>
       new ProductConfigFields { TrialDurationDays = TrialDurationDays, FreeTierEnabled = FreeTierEnabled };
 
+    /// <summary>The settings' signature, or null when the response carried none.
+    /// Present here as well as on /config because a route that delivered the
+    /// fields without their signature would be a way around
+    /// <see cref="KeylightConfig.RequireSignedConfig"/>.</summary>
+    public ConfigSignature? ConfigSignature { get; set; }
+
     internal static ValidateResponse? Parse(string json) {
       var root = JsonCodec.Parse(json);
       if (root == null) return null;
@@ -163,6 +169,7 @@ namespace Keylight {
       WireHelpers.ReadConfigFields(root, out var days, out var freeTier);
       resp.TrialDurationDays = days;
       resp.FreeTierEnabled = freeTier;
+      resp.ConfigSignature = WireHelpers.ReadConfigSignature(root);
       return resp;
     }
   }
@@ -190,9 +197,9 @@ namespace Keylight {
   /// <summary>Response body from the <c>GET /config</c> endpoint.</summary>
   /// <remarks>
   /// The signature fields (<c>issued_at</c>, <c>expires_at</c>, <c>kid</c>,
-  /// <c>signature</c>) are part of the frozen wire contract but are not verified
-  /// by this SDK yet — they are accepted and ignored so that adding verification
-  /// later is a change to this file alone.
+  /// <c>signature</c>) are part of the frozen wire contract. They are verified
+  /// when <see cref="KeylightConfig.RequireSignedConfig"/> is set, and carried
+  /// but unenforced otherwise.
   /// </remarks>
   public sealed class ConfigResponse {
     public int? TrialDurationDays { get; set; }
@@ -201,6 +208,8 @@ namespace Keylight {
     public ProductConfigFields ConfigFields =>
       new ProductConfigFields { TrialDurationDays = TrialDurationDays, FreeTierEnabled = FreeTierEnabled };
 
+    public ConfigSignature? ConfigSignature { get; set; }
+
     internal static ConfigResponse? Parse(string json) {
       var root = JsonCodec.Parse(json);
       if (root == null) return null;
@@ -208,6 +217,7 @@ namespace Keylight {
       WireHelpers.ReadConfigFields(root, out var days, out var freeTier);
       resp.TrialDurationDays = days;
       resp.FreeTierEnabled = freeTier;
+      resp.ConfigSignature = WireHelpers.ReadConfigSignature(root);
       return resp;
     }
   }
@@ -222,6 +232,24 @@ namespace Keylight {
       var days = root.Get("trial_duration_days")?.AsLong();
       trialDurationDays = days.HasValue ? (int)days.Value : (int?)null;
       freeTierEnabled = root.Get("free_tier_enabled")?.AsBool();
+    }
+
+    /// <summary>
+    /// Read the four signature fields off any response body. They arrive
+    /// together or not at all, so a partial set yields null — treated as
+    /// unsigned rather than as a malformed signature.
+    /// </summary>
+    internal static ConfigSignature? ReadConfigSignature(JsonValue root) {
+      var issuedAt = root.Get("issued_at")?.AsLong();
+      var expiresAt = root.Get("expires_at")?.AsLong();
+      var kid = root.Get("kid")?.AsString();
+      var signature = root.Get("signature")?.AsString();
+      if (!issuedAt.HasValue || !expiresAt.HasValue
+          || string.IsNullOrEmpty(kid) || string.IsNullOrEmpty(signature))
+        return null;
+      return new ConfigSignature {
+        IssuedAt = issuedAt.Value, ExpiresAt = expiresAt.Value, Kid = kid!, Signature = signature!
+      };
     }
 
     /// <summary>

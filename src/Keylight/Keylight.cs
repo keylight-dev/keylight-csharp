@@ -315,7 +315,7 @@ namespace Keylight {
       // branches above so it merges into whatever they just wrote, and
       // unconditionally: the settings are valid regardless of whether the
       // licence itself validated.
-      AbsorbConfigFields(resp.ConfigFields);
+      AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
     }
 
     /// <summary>
@@ -496,7 +496,7 @@ namespace Keylight {
       if (_transport is not IKeylightConfigTransport configTransport) return;
       try {
         var resp = await configTransport.FetchConfigAsync(ct).ConfigureAwait(false);
-        if (resp != null) AbsorbConfigFields(resp.ConfigFields);
+        if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
       } catch {
         // Best-effort: keep the cached settings.
       }
@@ -511,8 +511,27 @@ namespace Keylight {
     /// install already learned. Each field is written only when the server
     /// actually sent it, rather than overwriting the pair.
     /// </remarks>
-    internal void AbsorbConfigFields(ProductConfigFields fields) {
+    internal void AbsorbConfigFields(ProductConfigFields fields, ConfigSignature? signature = null) {
       if (fields == null || fields.IsEmpty) return;
+
+      // The one place signatures are checked, and deliberately the only one. The
+      // settings ride on /config, on /validate, and on the keyless beacon;
+      // verifying at any single route would leave the others as an
+      // unauthenticated way to write the same cache. Authentication is a
+      // property of the fields, not of the endpoint they arrived on.
+      //
+      // An unsigned response fails exactly as a badly signed one does —
+      // otherwise stripping the signature would be enough to bypass the check.
+      // Rejection keeps the cached settings: fall back to the seed, never to
+      // what the server claimed.
+      if (_config.RequireSignedConfig) {
+        if (signature == null) return;
+        if (!Verifier.VerifyConfig(
+              fields, signature, _config.TenantId, _config.ProductId,
+              _config.TrustedKeys, _nowSeconds()))
+          return;
+      }
+
       var current = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
       if (fields.TrialDurationDays.HasValue)
         current.ProductTrialDurationDays = fields.TrialDurationDays;
