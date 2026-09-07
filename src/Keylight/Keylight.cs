@@ -13,6 +13,11 @@ namespace Keylight {
     private readonly KeylightConfig _config;
     private readonly ILeaseStore _store;
     private readonly IKeylightTransport _transport;
+    private readonly IDeviceIdentity _device;
+
+    // Minimum interval between two successful keyless beacons that report the
+    // same state — see ReportKeylessStateAsync.
+    private const long KeylessDebounceSeconds = 86400;
 
     // Clock seam: returns Unix seconds. Defaults to real wall clock.
     // Exposed as an internal constructor parameter so tests can inject a
@@ -87,13 +92,15 @@ namespace Keylight {
       ILeaseStore? store,
       IKeylightTransport? transport,
       Func<long>? nowSeconds,
-      Func<long>? monotonicMillis = null) {
+      Func<long>? monotonicMillis = null,
+      IDeviceIdentity? device = null) {
       _config = config ?? throw new ArgumentNullException(nameof(config));
       _store = store ?? new FileLeaseStore();
       _transport = transport ?? new HttpClientTransport(
         config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       _nowSeconds = nowSeconds ?? RealNow;
       _monotonicMillis = monotonicMillis ?? RealMonotonicMillis;
+      _device = device ?? new SystemDeviceIdentity();
     }
 
     // ─── public API — version ────────────────────────────────────────────────
@@ -594,6 +601,96 @@ namespace Keylight {
       }
     }
 
+    // ─── keyless identity and beacon ────────────────────────────────────────
+
+    /// <summary>
+    /// Anonymous per-install id used by the keyless beacon and sent as
+    /// <c>free_tier_instance_id</c> on activate so a free-tier device that
+    /// buys is counted once. Minted on first use, persisted, never rotated.
+    /// </summary>
+    public string FreeTierInstanceId() {
+      var cached = Cached();
+      if (!string.IsNullOrEmpty(cached?.FreeTierInstanceId)) return cached!.FreeTierInstanceId!;
+      var id = Guid.NewGuid().ToString("D"); // RFC 4122 v4, 36 chars, lowercase
+      var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
+      s.FreeTierInstanceId = id;
+      _store.Save(s);
+      RefreshCache();
+      return id;
+    }
+
+    /// <summary>
+    /// Cross-SDK <c>machine_hash</c>, or null when no hardware id is known.
+    /// A live read wins and refreshes the cache; on a transient read failure the
+    /// last good id is reused so the hash stays stable. Never a random value.
+    /// </summary>
+    internal string? MachineHash() {
+      var live = _device.HardwareId();
+      live = string.IsNullOrEmpty(live?.Trim()) ? null : live!.Trim();
+      var cached = Cached();
+      string? hw;
+      if (live != null) {
+        hw = live;
+        if (cached?.CachedHardwareId != live) {
+          var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
+          s.CachedHardwareId = live;
+          _store.Save(s);
+          RefreshCache();
+        }
+      } else {
+        hw = string.IsNullOrEmpty(cached?.CachedHardwareId) ? null : cached!.CachedHardwareId;
+      }
+      return hw == null ? null : MachineId.Hash(_config.TenantId, _config.ProductId, hw);
+    }
+
+    /// <summary>
+    /// Anonymous keyless beacon for a device running without a license.
+    /// Debounced: skipped when the state is unchanged and the last successful
+    /// beacon is under 24h old. Persists the debounce markers only on success,
+    /// so a failed beacon retries next time. Never throws. The reply carries
+    /// the server-owned settings and goes through the same signature gate as
+    /// <c>/config</c> and validate.
+    /// </summary>
+    public async Task ReportKeylessStateAsync(KeylessState state, CancellationToken ct = default) {
+      if (_transport is not IKeylightKeylessTransport keyless) return;
+      var wire = KeylessStateWire.Of(state);
+      var cached = Cached();
+      var now = _nowSeconds();
+      bool changed = cached?.KeylessLastState != wire;
+      bool within = cached?.LastKeylessPingAt.HasValue == true && now - cached!.LastKeylessPingAt!.Value < KeylessDebounceSeconds;
+      if (!changed && within) return;
+
+      var req = new KeylessRequest {
+        InstanceId  = FreeTierInstanceId(),
+        State       = wire,
+        MachineHash = MachineHash(),
+        AppVersion  = _config.AppVersion,
+        SdkVersion  = SdkInfo.Version,
+        Platform    = _config.Platform ?? Device.Platform,
+        CpuCores    = Device.CpuCores,
+        Memory      = Device.Memory,
+        OsVersion   = Device.OsVersionValue,
+        Arch        = Device.Arch
+      };
+
+      KeylessResponse? resp;
+      try {
+        resp = await keyless.ReportKeylessAsync(req, ct).ConfigureAwait(false);
+      } catch {
+        return; // anonymous best-effort; the markers stay unarmed so the next call retries
+      }
+
+      // A 2xx reached us (the transport throws otherwise). Absorb first — it
+      // goes through the signature gate and may be rejected — then arm the
+      // debounce regardless: the beacon itself succeeded.
+      if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
+      var s = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+      s.KeylessLastState = wire;
+      s.LastKeylessPingAt = _nowSeconds();
+      _store.Save(s);
+      RefreshCache();
+    }
+
     /// <summary>
     /// Merge server-sent settings into the cache, <b>field by field</b>.
     /// </summary>
@@ -607,10 +704,10 @@ namespace Keylight {
       if (fields == null || fields.IsEmpty) return;
 
       // The one place signatures are checked, and deliberately the only one. The
-      // settings ride on both /config and validate (this SDK has no keyless
-      // beacon); verifying at any single route would leave the other as an
-      // unauthenticated way to write the same cache. Authentication is a
-      // property of the fields, not of the endpoint they arrived on.
+      // settings ride on /config, validate, and the keyless beacon; verifying
+      // at any single route would leave the others as an unauthenticated way
+      // to write the same cache. Authentication is a property of the fields,
+      // not of the endpoint they arrived on.
       //
       // An unsigned response fails exactly as a badly signed one does —
       // otherwise stripping the signature would be enough to bypass the check.

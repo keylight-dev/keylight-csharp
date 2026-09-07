@@ -42,6 +42,30 @@ namespace Keylight.Tests {
       => Task.CompletedTask;
   }
 
+  public class KeylessTransport : IKeylightTransport, IKeylightKeylessTransport {
+    public readonly List<KeylessRequest> Beacons = new();
+    public Func<KeylessRequest, KeylessResponse?> Reply = _ => new KeylessResponse { Received = true };
+    public Exception? Throw; // set to make the beacon fail
+
+    public Task<ActivateResponse> ActivateAsync(ActivateRequest req, CancellationToken ct = default)
+      => Task.FromResult(new ActivateResponse { Activated = false });
+    public Task<ValidateResponse> ValidateAsync(ValidateRequest req, CancellationToken ct = default)
+      => Task.FromResult(new ValidateResponse { Valid = false, Error = "no license" });
+    public Task DeactivateAsync(DeactivateRequest req, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<KeylessResponse?> ReportKeylessAsync(KeylessRequest req, CancellationToken ct = default) {
+      if (Throw != null) throw Throw;
+      Beacons.Add(req);
+      return Task.FromResult(Reply(req));
+    }
+  }
+
+  public class FakeDevice : IDeviceIdentity {
+    private readonly Queue<string?> _answers;
+    public FakeDevice(params string?[] answers) { _answers = new Queue<string?>(answers); }
+    public string? HardwareId() => _answers.Count > 1 ? _answers.Dequeue() : (_answers.Count == 1 ? _answers.Peek() : null);
+  }
+
   // ─── config / client builder helpers ──────────────────────────────────────
 
   static class ClientHelper {
