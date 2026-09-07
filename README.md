@@ -83,6 +83,7 @@ dotnet add package Keylight
 ```
 
 ```csharp
+using System.Linq;
 using System.Net.Http;
 using Keylight;
 
@@ -93,7 +94,7 @@ var keyset = await Keyset.FetchAsync(http, "https://api.keylight.dev", "your-ten
 
 var config = KeylightConfig
     .Builder("your-tenant", "your-product", "sdk_live_…")
-    .TrustedKeys(keyset?.Keys ?? new Dictionary<string, string>())
+    .TrustedKeys(keyset?.Keys.ToDictionary(kv => kv.Key, kv => kv.Value) ?? new Dictionary<string, string>())
     .MaxOfflineDays(15)  // optional offline grace window (15 is the default)
     .Build();
 
