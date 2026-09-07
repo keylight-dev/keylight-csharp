@@ -37,7 +37,7 @@ namespace Keylight.Tests {
       var transport = new FakeTransport(
         activate: _ => new ActivateResponse { Activated = false },
         validate: _ => new ValidateResponse { Valid = true, Lease = lease });
-      var client = ClientHelper.MakeClient(ClientHelper.MakeConfig(keys), transport, store, now);
+      var client = new KeylightClient(ClientHelper.MakeConfig(keys), store, transport, () => now, null, new FakeDevice("hw-1"));
       await client.ValidateAsync();
       var after = store.Load()!;
       Assert.Equal("ft-1", after.FreeTierInstanceId);

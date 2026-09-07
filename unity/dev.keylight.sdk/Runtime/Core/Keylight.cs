@@ -188,7 +188,11 @@ namespace Keylight {
         OsVersion    = Device.OsVersionValue,
         Arch         = Device.Arch,
         Memory       = Device.Memory,
-        SdkTrialDurationDays = _config.TrialDurationDays
+        SdkTrialDurationDays = _config.TrialDurationDays,
+        // Attribution: only an id that ALREADY exists — never mint one here —
+        // so a device converting from free tier to paid is counted once.
+        FreeTierInstanceId = Cached()?.FreeTierInstanceId,
+        MachineHash        = MachineHash(),
       };
 
       ActivateResponse resp;
@@ -245,7 +249,8 @@ namespace Keylight {
         OsVersion  = Device.OsVersionValue,
         Arch       = Device.Arch,
         Memory     = Device.Memory,
-        SdkTrialDurationDays = _config.TrialDurationDays
+        SdkTrialDurationDays = _config.TrialDurationDays,
+        MachineHash = MachineHash(),
       };
 
       ValidateResponse resp;
@@ -541,6 +546,10 @@ namespace Keylight {
         var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
         if (!current.TrialStartedAt.HasValue) {
           current.TrialStartedAt = _nowSeconds();
+          // The trial start is the moment conversion attribution begins, so
+          // mint the free-tier id now rather than on the first beacon.
+          if (string.IsNullOrEmpty(current.FreeTierInstanceId))
+            current.FreeTierInstanceId = Guid.NewGuid().ToString("D");
           _store.Save(current);
           RefreshCache();
         }
