@@ -131,5 +131,14 @@ namespace Keylight.Tests {
         new MemoryLeaseStore(), new FakeTransport(_ => new ActivateResponse { Activated = false }), () => T);
       await c.ReportKeylessStateAsync(KeylessState.Trial); // must not throw
     }
+
+    [Fact]
+    public async Task A_failing_store_write_never_throws() {
+      var t = new KeylessTransport();
+      var c = new KeylightClient(
+        KeylightConfig.Builder("testco", "testapp", "sdk-key-test").Build(),
+        new ThrowingLeaseStore(), t, () => T, null, new FakeDevice("hardware-1"));
+      await c.ReportKeylessStateAsync(KeylessState.Trial); // must not throw, even though every Save() does
+    }
   }
 }

@@ -17,6 +17,14 @@ namespace Keylight.Tests {
     public void Clear() => _state = null;
   }
 
+  /// <summary>Simulates a disk/permission failure on every write — e.g. a
+  /// read-only or full profile directory hitting FileLeaseStore.Save.</summary>
+  public class ThrowingLeaseStore : ILeaseStore {
+    public CachedState? Load() => null;
+    public void Save(CachedState s) => throw new IOException("disk full");
+    public void Clear() { }
+  }
+
   // ─── fake transport ────────────────────────────────────────────────────────
 
   public class FakeTransport : IKeylightTransport {

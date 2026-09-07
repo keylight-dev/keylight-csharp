@@ -653,42 +653,55 @@ namespace Keylight {
     /// </summary>
     public async Task ReportKeylessStateAsync(KeylessState state, CancellationToken ct = default) {
       if (_transport is not IKeylightKeylessTransport keyless) return;
-      var wire = KeylessStateWire.Of(state);
-      var cached = Cached();
-      var now = _nowSeconds();
-      bool changed = cached?.KeylessLastState != wire;
-      bool within = cached?.LastKeylessPingAt.HasValue == true && now - cached!.LastKeylessPingAt!.Value < KeylessDebounceSeconds;
-      if (!changed && within) return;
-
-      var req = new KeylessRequest {
-        InstanceId  = FreeTierInstanceId(),
-        State       = wire,
-        MachineHash = MachineHash(),
-        AppVersion  = _config.AppVersion,
-        SdkVersion  = SdkInfo.Version,
-        Platform    = _config.Platform ?? Device.Platform,
-        CpuCores    = Device.CpuCores,
-        Memory      = Device.Memory,
-        OsVersion   = Device.OsVersionValue,
-        Arch        = Device.Arch
-      };
-
-      KeylessResponse? resp;
+      // Everything below — including FreeTierInstanceId()/MachineHash()'s own
+      // store writes, AbsorbConfigFields' store write, and the debounce
+      // markers' store write — is wrapped: this is an anonymous best-effort
+      // beacon fired from launch and background-timer paths, and a disk or
+      // permission failure on any of those writes (FileLeaseStore.Save is
+      // unguarded) must not escape as an unobserved faulted task or a host
+      // crash. Mirrors the "never throws" contract FetchConfigAsync already
+      // keeps for its own store write.
       try {
-        resp = await keyless.ReportKeylessAsync(req, ct).ConfigureAwait(false);
-      } catch {
-        return; // anonymous best-effort; the markers stay unarmed so the next call retries
-      }
+        var wire = KeylessStateWire.Of(state);
+        var cached = Cached();
+        var now = _nowSeconds();
+        bool changed = cached?.KeylessLastState != wire;
+        bool within = cached?.LastKeylessPingAt.HasValue == true && now - cached!.LastKeylessPingAt!.Value < KeylessDebounceSeconds;
+        if (!changed && within) return;
 
-      // A 2xx reached us (the transport throws otherwise). Absorb first — it
-      // goes through the signature gate and may be rejected — then arm the
-      // debounce regardless: the beacon itself succeeded.
-      if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
-      var s = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
-      s.KeylessLastState = wire;
-      s.LastKeylessPingAt = _nowSeconds();
-      _store.Save(s);
-      RefreshCache();
+        var req = new KeylessRequest {
+          InstanceId  = FreeTierInstanceId(),
+          State       = wire,
+          MachineHash = MachineHash(),
+          AppVersion  = _config.AppVersion,
+          SdkVersion  = SdkInfo.Version,
+          Platform    = _config.Platform ?? Device.Platform,
+          CpuCores    = Device.CpuCores,
+          Memory      = Device.Memory,
+          OsVersion   = Device.OsVersionValue,
+          Arch        = Device.Arch
+        };
+
+        KeylessResponse? resp;
+        try {
+          resp = await keyless.ReportKeylessAsync(req, ct).ConfigureAwait(false);
+        } catch {
+          return; // anonymous best-effort; the markers stay unarmed so the next call retries
+        }
+
+        // A 2xx reached us (the transport throws otherwise). Absorb first —
+        // it goes through the signature gate and may be rejected — then arm
+        // the debounce regardless: the beacon itself succeeded.
+        if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
+        var s = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+        s.KeylessLastState = wire;
+        s.LastKeylessPingAt = _nowSeconds();
+        _store.Save(s);
+        RefreshCache();
+      } catch {
+        // Best-effort and anonymous: a store failure anywhere above must not
+        // throw out of this method.
+      }
     }
 
     /// <summary>
