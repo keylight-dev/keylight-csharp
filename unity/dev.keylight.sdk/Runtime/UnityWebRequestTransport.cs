@@ -31,7 +31,7 @@ namespace Keylight.Unity {
   /// same code path used by the <c>HttpClientTransport</c>.
   /// </para>
   /// </summary>
-  public sealed class UnityWebRequestTransport : IKeylightTransport {
+  public sealed class UnityWebRequestTransport : IKeylightTransport, IKeylightConfigTransport, IKeylightKeylessTransport {
     private readonly string _baseUrl;
     private readonly string _tenantId;
     private readonly string _productId;
@@ -88,6 +88,23 @@ namespace Keylight.Unity {
       await PostJsonAsync("deactivate", req.ToJson(), ct).ConfigureAwait(false);
     }
 
+    // ─── IKeylightConfigTransport ────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ConfigResponse?> FetchConfigAsync(CancellationToken ct = default) {
+      var body = await GetJsonAsync("config", ct).ConfigureAwait(false);
+      return ConfigResponse.Parse(body);
+    }
+
+    // ─── IKeylightKeylessTransport ───────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<KeylessResponse?> ReportKeylessAsync(
+      KeylessRequest req, CancellationToken ct = default) {
+      var body = await PostJsonAsync("keyless", req.ToJson(), ct).ConfigureAwait(false);
+      return KeylessResponse.Parse(body);
+    }
+
     // ─── private helpers ─────────────────────────────────────────────────────
 
     private string BuildUrl(string action) =>
@@ -114,6 +131,46 @@ namespace Keylight.Unity {
       };
       uwr.SetRequestHeader("Content-Type",          "application/json");
       uwr.SetRequestHeader("X-Keylight-SDK-Key",    _sdkKey);
+
+      // Await the web request.  UnityWebRequestAwaiter resumes on the main thread
+      // (Unity's SendWebRequest callback), which is correct — UnityEngine objects
+      // must only be accessed from the main thread.
+      await uwr.SendWebRequest();
+
+      // CancellationToken check: UnityWebRequest doesn't natively support
+      // cancellation tokens, so we check after completion (best-effort).
+      ct.ThrowIfCancellationRequested();
+
+      // Non-2xx → ActivationException with the HTTP status code.
+#if UNITY_2021_3_OR_NEWER
+      var statusCode = (int)uwr.responseCode;
+#else
+      var statusCode = 0;
+#endif
+      if (uwr.result == UnityWebRequest.Result.ConnectionError ||
+          uwr.result == UnityWebRequest.Result.DataProcessingError) {
+        throw new ActivationException(0, $"Network error: {uwr.error}");
+      }
+      Keylight.TransportHelpers.EnsureSuccess(statusCode, uwr.downloadHandler.text);
+
+      return uwr.downloadHandler.text;
+    }
+
+    /// <summary>
+    /// GET <c>{baseUrl}/{tenantId}/{productId}/{action}</c>, wait for the
+    /// response, and return the response body as a string. Same header and
+    /// status handling as <see cref="PostJsonAsync"/> (mirrors the behaviour
+    /// of <c>HttpClientTransport.FetchConfigAsync</c>).
+    /// </summary>
+    private async Task<string> GetJsonAsync(
+      string action,
+      CancellationToken ct) {
+
+      var url = BuildUrl(action);
+
+      // UnityWebRequest.Get already wires up a DownloadHandlerBuffer.
+      using var uwr = UnityWebRequest.Get(url);
+      uwr.SetRequestHeader("X-Keylight-SDK-Key", _sdkKey);
 
       // Await the web request.  UnityWebRequestAwaiter resumes on the main thread
       // (Unity's SendWebRequest callback), which is correct — UnityEngine objects

@@ -50,6 +50,14 @@ namespace Keylight.Unity {
       if (SystemInfo.systemMemorySize > 0)
         PhysicalMemory.SetTotalBytes((long)SystemInfo.systemMemorySize * 1024L * 1024L);
 
+      // The core's native hardware-id probes are compiled out under Unity for
+      // the same reason as the memory probe. SystemInfo.deviceUniqueIdentifier
+      // is Unity's cross-platform stable device id; it is NOT the same source
+      // the native SDKs read (IOPlatformUUID / MachineGuid), so a Unity build
+      // and a C++ build of the same product on one machine hash differently.
+      // It is still stable across reinstalls, which is what the dedupe needs.
+      SystemDeviceIdentity.SetHardwareId(SystemInfo.deviceUniqueIdentifier);
+
       var store     = new UnityLeaseStore(leaseFilename);
       var transport = new UnityWebRequestTransport(config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       return new KeylightClient(config, store, transport);
