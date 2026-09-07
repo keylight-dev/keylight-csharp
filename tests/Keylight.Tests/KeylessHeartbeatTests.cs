@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Keylight;
 using Xunit;
@@ -26,6 +27,56 @@ namespace Keylight.Tests {
       Assert.Single(t.Beacons);
       Assert.Equal("trial", t.Beacons[0].State);
       Assert.Equal(21, c.EffectiveTrialDurationDays());
+    }
+
+    /// <summary>A transport that can do both: the beacon AND the /config fetch.
+    /// The shape the real <c>HttpClientTransport</c> and
+    /// <c>UnityWebRequestTransport</c> have.</summary>
+    private sealed class BeaconAndConfigTransport : KeylessTransport, IKeylightConfigTransport {
+      public int ConfigFetches;
+      public ConfigResponse? Config = new ConfigResponse { TrialDurationDays = 21, FreeTierEnabled = true };
+      public Task<ConfigResponse?> FetchConfigAsync(CancellationToken ct = default) {
+        ConfigFetches++;
+        return Task.FromResult(Config);
+      }
+    }
+
+    [Fact]
+    public async Task A_fresh_install_with_no_trial_seed_still_learns_the_settings_at_launch() {
+      // The resting state of a fresh install with no compiled-in trial seed is
+      // Invalid: no lease, no trial duration, and free tier off until the server
+      // says otherwise. KeylessStateWire.For(Invalid) is null — Invalid is a
+      // denial, not a device worth counting — so there is no beacon to send.
+      // If launch stopped there, the dashboard's trial length and free-tier flag
+      // would never reach the install: it would sit Invalid forever and never
+      // beacon. It must fall back to /config, exactly as 0.4.1 did.
+      var t = new BeaconAndConfigTransport();
+      using var c = new KeylightClient(
+        KeylightConfig.Builder("testco", "testapp", "k").Build(),
+        new MemoryLeaseStore(), t, () => T, null, new FakeDevice("hardware-1"));
+
+      await c.CheckOnLaunchAsync();
+
+      Assert.Empty(t.Beacons);              // nothing to report for Invalid
+      Assert.Equal(1, t.ConfigFetches);     // but the settings still arrived
+      Assert.Equal(21, c.EffectiveTrialDurationDays());
+      Assert.True(c.EffectiveFreeTierEnabled());
+    }
+
+    [Fact]
+    public async Task A_beaconable_state_uses_the_beacon_and_not_the_config_fetch() {
+      // The other half of the same branch: when there IS a state to report the
+      // beacon carries the settings, and /config is not called as well.
+      var t = new BeaconAndConfigTransport();
+      using var c = new KeylightClient(
+        KeylightConfig.Builder("testco", "testapp", "k").TrialDurationDays(14).Build(),
+        new MemoryLeaseStore(), t, () => T, null, new FakeDevice("hardware-1"));
+
+      await c.CheckOnLaunchAsync();
+
+      Assert.Single(t.Beacons);
+      Assert.Equal("trial", t.Beacons[0].State);
+      Assert.Equal(0, t.ConfigFetches);
     }
 
     [Fact]

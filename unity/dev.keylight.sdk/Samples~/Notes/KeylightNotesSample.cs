@@ -88,9 +88,13 @@ namespace Keylight.Unity.Samples {
 
       activateButton.onClick.AddListener(OnActivateClicked);
 
-      // Check on launch: refreshes a stale cached lease if present.
+      // Check on launch: refreshes a stale cached lease if present, and sends
+      // the keyless beacon for an unlicensed install. Go through
+      // KeylightUnity rather than the client directly — it stops the background
+      // keyless heartbeat, whose thread-pool ticks cannot touch
+      // UnityWebRequest. A Unity build beacons at launch only.
       try {
-        await _client.CheckOnLaunchAsync();
+        await KeylightUnity.CheckOnLaunchAsync(_client);
       } catch (Exception ex) {
         Debug.LogWarning($"[Keylight] CheckOnLaunchAsync: {ex.Message}");
       }
@@ -158,6 +162,10 @@ namespace Keylight.Unity.Samples {
       var msg = state switch {
         KeylightState.Licensed => hasPro ? "Licensed (Pro)" : "Licensed",
         KeylightState.Trial    => "Trial",
+        KeylightState.FreeTier => "Free tier",
+        // A trusted lease the server could only issue as `fallback`: run
+        // degraded rather than locking the user out.
+        KeylightState.Limited  => "Limited (reduced features)",
         KeylightState.Expired  => "License expired",
         KeylightState.Invalid  => "No license",
         _                      => state.ToString()

@@ -35,10 +35,12 @@ namespace Keylight {
     /// </summary>
     public int?    ProductTrialDurationDays { get; set; }
     /// <summary>
-    /// Free-tier flag last heard from the server. Persisted for wire parity with
-    /// the other SDKs and so a later free-tier port inherits the plumbing, but
-    /// <b>currently unread</b>: this SDK has no free-tier state
-    /// (<see cref="KeylightState"/> has no FreeTier member) and no keyless beacon.
+    /// Free-tier flag last heard from the server — over <c>/config</c>, validate,
+    /// or the keyless beacon. Read by
+    /// <see cref="KeylightClient.EffectiveFreeTierEnabled"/>: when it is on and
+    /// no license or running trial applies, <see cref="KeylightClient.State"/>
+    /// resolves to <see cref="KeylightState.FreeTier"/> and the beacon reports
+    /// this device as <c>free_tier</c>.
     /// </summary>
     public bool?   ProductFreeTierEnabled { get; set; }
     /// <summary>Anonymous per-install id for the keyless beacon and for

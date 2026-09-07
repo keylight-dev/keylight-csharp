@@ -6,17 +6,21 @@ namespace Keylight {
   /// <summary>
   /// The Keylight client. Entry-point for all activation, validation, and
   /// entitlement queries. Thread-safe for concurrent reads of <see cref="State"/>
-  /// and <see cref="HasEntitlement"/>; async methods should not be called
-  /// concurrently on the same instance.
+  /// and <see cref="HasEntitlement"/>.
   ///
-  /// <para><b>Heartbeat concurrency.</b> Once <see cref="StartKeylessHeartbeat"/>
-  /// runs (directly, or via <see cref="CheckOnLaunchAsync"/>), <see cref="HeartbeatTick"/>
-  /// runs <see cref="ReportKeylessStateAsync"/> on a thread-pool timer thread rather
-  /// than on a thread the app controls. Its only store write is the post-2xx
-  /// marker save (plus <see cref="AbsorbConfigFields"/>) inside that method, so in
-  /// a narrow window that write can race a save from an app-initiated
-  /// <see cref="ActivateAsync"/> or <see cref="ValidateAsync"/> call — the same
-  /// contract the C++ SDK has, where the beacon runs on its own thread. Call
+  /// <para><b>Store concurrency.</b> Every load-mutate-save of the persisted
+  /// state — and the cache refresh that publishes the result — is serialised on
+  /// one private lock, so two writers never interleave and no reader observes a
+  /// half-published cache. The keyless heartbeat shares that lock: once
+  /// <see cref="StartKeylessHeartbeat"/> runs (directly, or via
+  /// <see cref="CheckOnLaunchAsync"/>), <see cref="HeartbeatTick"/> drives
+  /// <see cref="ReportKeylessStateAsync"/> from a thread-pool timer thread, and
+  /// its config/marker writes queue behind an app-initiated
+  /// <see cref="ActivateAsync"/>, <see cref="ValidateAsync"/> or
+  /// <see cref="DeactivateAsync"/> instead of racing them. No lock is ever held
+  /// across an <c>await</c>, so the network calls themselves stay concurrent:
+  /// concurrent async calls on one instance are last-writer-wins at the
+  /// operation level, but can no longer corrupt or wipe the store. Call
   /// <see cref="Dispose"/> (or <see cref="StopKeylessHeartbeat"/>) when tearing
   /// the client down.</para>
   /// </summary>
@@ -37,9 +41,20 @@ namespace Keylight {
 
     // ─── in-memory cache ─────────────────────────────────────────────────────
     // Eliminates redundant _store.Load() + Ed25519 calls on read paths.
-    // Written only from write paths (ActivateAsync, ValidateAsync, DeactivateAsync,
-    // CheckOnLaunchAsync trial-start) which are not called concurrently per the
-    // documented contract. Read paths only read these fields — no lock needed.
+    //
+    // Guarded by _stateLock, and so is every _store.Load()/_store.Save() pair
+    // that produces them: the heartbeat's timer thread writes the same store as
+    // ActivateAsync/ValidateAsync/DeactivateAsync, so an unsynchronised
+    // load-mutate-save there can drop a just-persisted lease, or read a
+    // half-written file back as null and then persist the wipe.
+    //
+    // Readers take the lock too. _cachedState and _cachedVerifyResult are only
+    // meaningful as a pair — a lease published without its VerifyResult would
+    // fault ResolveState — so they are read through a single Snapshot().
+    //
+    // Monitor is re-entrant, so a locked region may call Cached()/RefreshCache()
+    // freely. Nothing awaits while holding it.
+    private readonly object _stateLock = new object();
     private bool          _cachePopulated;      // false until first RefreshCache()
     private CachedState?  _cachedState;         // null when store is empty
     private VerifyResult? _cachedVerifyResult;  // null when no lease on disk
@@ -220,15 +235,17 @@ namespace Keylight {
       if (resp.Lease != null)
         VerifyOrReject(resp.Lease);
 
-      var state = Carry(Cached(), new CachedState {
-        Lease      = resp.Lease,
-        InstanceId = resp.InstanceId,
-        // Required on every subsequent /validate and /deactivate.
-        LicenseKey = licenseKey,
-        FetchedAt  = _nowSeconds()
-      });
-      _store.Save(state);
-      RefreshCache();
+      lock (_stateLock) {
+        var state = Carry(Cached(), new CachedState {
+          Lease      = resp.Lease,
+          InstanceId = resp.InstanceId,
+          // Required on every subsequent /validate and /deactivate.
+          LicenseKey = licenseKey,
+          FetchedAt  = _nowSeconds()
+        });
+        _store.Save(state);
+        RefreshCache();
+      }
     }
 
     /// <summary>
@@ -290,15 +307,22 @@ namespace Keylight {
       if (resp.Lease != null) {
         // Verify-or-reject before persisting the updated lease
         VerifyOrReject(resp.Lease);
-        var newState = Carry(cached, new CachedState {
-          Lease          = resp.Lease,
-          InstanceId     = cached?.InstanceId,
-          // Carry the key forward: every future check-in needs it on the wire.
-          LicenseKey     = cached?.LicenseKey,
-          FetchedAt      = _nowSeconds()
-        });
-        _store.Save(newState);
-        RefreshCache();
+        lock (_stateLock) {
+          // Re-read the stored state under the lock instead of reusing the
+          // `cached` snapshot taken at the top: MachineHash() above may have
+          // rewritten the store (cached hardware id), and a heartbeat tick may
+          // have landed during the await. ActivateAsync already does this.
+          var current = Cached();
+          var newState = Carry(current, new CachedState {
+            Lease          = resp.Lease,
+            InstanceId     = current?.InstanceId,
+            // Carry the key forward: every future check-in needs it on the wire.
+            LicenseKey     = current?.LicenseKey,
+            FetchedAt      = _nowSeconds()
+          });
+          _store.Save(newState);
+          RefreshCache();
+        }
       } else if (!resp.Valid) {
         // Definitive rejection with no lease (revoked / deactivated instance /
         // unknown license): the server responded but refused to vouch for us.
@@ -308,15 +332,19 @@ namespace Keylight {
         // the next State/HasEntitlement read resolves to Invalid (or, if a
         // trial is configured and still running, falls back to Trial —
         // mirroring the same precedence DeactivateAsync already uses).
-        var newState = Carry(cached, new CachedState {
-          Lease          = null,
-          InstanceId     = cached?.InstanceId,
-          // Carry the key forward: every future check-in needs it on the wire.
-          LicenseKey     = cached?.LicenseKey,
-          FetchedAt      = _nowSeconds()
-        });
-        _store.Save(newState);
-        RefreshCache();
+        lock (_stateLock) {
+          // Re-read under the lock, for the same reason as the branch above.
+          var current = Cached();
+          var newState = Carry(current, new CachedState {
+            Lease          = null,
+            InstanceId     = current?.InstanceId,
+            // Carry the key forward: every future check-in needs it on the wire.
+            LicenseKey     = current?.LicenseKey,
+            FetchedAt      = _nowSeconds()
+          });
+          _store.Save(newState);
+          RefreshCache();
+        }
       }
       // resp.Valid == true && resp.Lease == null: the server confirmed
       // validity without sending a refreshed lease. Nothing to persist —
@@ -503,9 +531,11 @@ namespace Keylight {
       // Drop the license, keep the device: the trial clock must survive (or a
       // deactivate would mint a fresh trial), and so must the keyless identity
       // and the settings the dashboard already delivered. Mirrors C++ and Rust.
-      var kept = Carry(Cached(), new CachedState { FetchedAt = _nowSeconds() });
-      _store.Save(kept);
-      RefreshCache();
+      lock (_stateLock) {
+        var kept = Carry(Cached(), new CachedState { FetchedAt = _nowSeconds() });
+        _store.Save(kept);
+        RefreshCache();
+      }
     }
 
     /// <summary>
@@ -523,7 +553,7 @@ namespace Keylight {
       // Prime the cache before any reads below.
       RefreshCache();
 
-      if (_cachedState != null)
+      if (Cached() != null)
         await ValidateAsync(ct).ConfigureAwait(false);
       // Note: ValidateAsync may call RefreshCache() internally (via
       // _store.Save → RefreshCache), so _cachedState reflects the latest
@@ -551,23 +581,33 @@ namespace Keylight {
         // State resolves to Invalid until the free-tier id (and, on some
         // installs, the trial clock) exists, so the beacon this launch sends
         // must see the post-stamp state.
-        var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
-        if (!current.TrialStartedAt.HasValue) {
-          current.TrialStartedAt = _nowSeconds();
-          // The trial start is the moment conversion attribution begins, so
-          // mint the free-tier id now rather than on the first beacon.
-          if (string.IsNullOrEmpty(current.FreeTierInstanceId))
-            current.FreeTierInstanceId = Guid.NewGuid().ToString("D");
-          _store.Save(current);
-          RefreshCache();
+        lock (_stateLock) {
+          var current = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+          if (!current.TrialStartedAt.HasValue) {
+            current.TrialStartedAt = _nowSeconds();
+            // The trial start is the moment conversion attribution begins, so
+            // mint the free-tier id now rather than on the first beacon.
+            if (string.IsNullOrEmpty(current.FreeTierInstanceId))
+              current.FreeTierInstanceId = Guid.NewGuid().ToString("D");
+            _store.Save(current);
+            RefreshCache();
+          }
         }
 
         // An unlicensed install learns the dashboard settings from the keyless
         // beacon, like every other SDK. Debounced 24h, so this is at most one
-        // call a day. A transport without the beacon keeps the /config fetch.
-        if (_transport is IKeylightKeylessTransport) {
-          var ks = KeylessStateWire.For(State);
-          if (ks.HasValue) await ReportKeylessStateAsync(ks.Value, ct).ConfigureAwait(false);
+        // call a day.
+        //
+        // The /config fetch is the fallback for BOTH cases that cannot beacon:
+        // a transport without the capability, and — the one that matters on a
+        // fresh install — a state with nothing to report. KeylessStateWire.For
+        // returns null for Invalid, which is exactly where a new install with
+        // no compiled-in trial seed rests until the server tells it the trial
+        // length or the free-tier flag. Skipping the fetch there would strand
+        // it: Invalid forever, and never a beacon either.
+        if (_transport is IKeylightKeylessTransport &&
+            KeylessStateWire.For(State) is KeylessState ks) {
+          await ReportKeylessStateAsync(ks, ct).ConfigureAwait(false);
         } else {
           await FetchConfigAsync(ct).ConfigureAwait(false);
         }
@@ -600,9 +640,10 @@ namespace Keylight {
     /// Same precedence as <see cref="EffectiveTrialDurationDays"/>. There is no
     /// local seed for this one — <see cref="KeylightConfig"/> has never carried
     /// a free-tier setting, so an install that has not yet heard from the
-    /// server reports <c>false</c>. The SDK only reports the flag; it does not
-    /// gate anything on it (<see cref="KeylightState"/> has no FreeTier member),
-    /// so what a free tier unlocks is the host app's decision.
+    /// server reports <c>false</c>. When it is on and nothing else applies,
+    /// <see cref="State"/> resolves to <see cref="KeylightState.FreeTier"/> —
+    /// but the SDK still gates nothing on it, so what a free tier actually
+    /// unlocks is the host app's decision.
     /// </remarks>
     public bool EffectiveFreeTierEnabled() {
       var cached = Cached()?.ProductFreeTierEnabled;
@@ -638,36 +679,53 @@ namespace Keylight {
     /// buys is counted once. Minted on first use, persisted, never rotated.
     /// </summary>
     public string FreeTierInstanceId() {
-      var cached = Cached();
-      if (!string.IsNullOrEmpty(cached?.FreeTierInstanceId)) return cached!.FreeTierInstanceId!;
-      var id = Guid.NewGuid().ToString("D"); // RFC 4122 v4, 36 chars, lowercase
-      var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
-      s.FreeTierInstanceId = id;
-      _store.Save(s);
-      RefreshCache();
-      return id;
+      // Check-and-mint has to be one critical section, or two threads that both
+      // find it absent mint two ids and the second overwrites the first.
+      lock (_stateLock) {
+        var cached = Cached();
+        if (!string.IsNullOrEmpty(cached?.FreeTierInstanceId)) return cached!.FreeTierInstanceId!;
+        var id = Guid.NewGuid().ToString("D"); // RFC 4122 v4, 36 chars, lowercase
+        var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
+        s.FreeTierInstanceId = id;
+        _store.Save(s);
+        RefreshCache();
+        return id;
+      }
     }
 
     /// <summary>
-    /// Cross-SDK <c>machine_hash</c>, or null when no hardware id is known.
+    /// The cross-SDK <c>machine_hash</c> this install sends on activate,
+    /// validate, and the keyless beacon — a salted hash of the machine's
+    /// hardware id, never the id itself.
+    /// </summary>
+    /// <returns>
+    /// The hash, or <c>null</c> when no hardware id is available on this
+    /// platform or build (a Unity WebGL build, for instance) — in which case the
+    /// field is simply omitted from the wire.
+    /// </returns>
+    /// <remarks>
     /// A live read wins and refreshes the cache; on a transient read failure the
     /// last good id is reused so the hash stays stable. Never a random value.
-    /// </summary>
-    internal string? MachineHash() {
+    /// </remarks>
+    public string? MachineHash() {
+      // The hardware probe itself stays outside the lock: it can be a slow
+      // native/registry read and it touches nothing shared.
       var live = _device.HardwareId();
       live = string.IsNullOrEmpty(live?.Trim()) ? null : live!.Trim();
-      var cached = Cached();
       string? hw;
-      if (live != null) {
-        hw = live;
-        if (cached?.CachedHardwareId != live) {
-          var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
-          s.CachedHardwareId = live;
-          _store.Save(s);
-          RefreshCache();
+      lock (_stateLock) {
+        var cached = Cached();
+        if (live != null) {
+          hw = live;
+          if (cached?.CachedHardwareId != live) {
+            var s = cached ?? new CachedState { FetchedAt = _nowSeconds() };
+            s.CachedHardwareId = live;
+            _store.Save(s);
+            RefreshCache();
+          }
+        } else {
+          hw = string.IsNullOrEmpty(cached?.CachedHardwareId) ? null : cached!.CachedHardwareId;
         }
-      } else {
-        hw = string.IsNullOrEmpty(cached?.CachedHardwareId) ? null : cached!.CachedHardwareId;
       }
       return hw == null ? null : MachineId.Hash(_config.TenantId, _config.ProductId, hw);
     }
@@ -721,12 +779,14 @@ namespace Keylight {
         // A 2xx reached us (the transport throws otherwise). Absorb first —
         // it goes through the signature gate and may be rejected — then arm
         // the debounce regardless: the beacon itself succeeded.
-        if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
-        var s = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
-        s.KeylessLastState = wire;
-        s.LastKeylessPingAt = _nowSeconds();
-        _store.Save(s);
-        RefreshCache();
+        lock (_stateLock) {
+          if (resp != null) AbsorbConfigFields(resp.ConfigFields, resp.ConfigSignature);
+          var s = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+          s.KeylessLastState = wire;
+          s.LastKeylessPingAt = _nowSeconds();
+          _store.Save(s);
+          RefreshCache();
+        }
       } catch {
         // Best-effort and anonymous: a store failure anywhere above must not
         // throw out of this method.
@@ -770,8 +830,11 @@ namespace Keylight {
 
     private void HeartbeatTick() {
       if (_disposed) return;
-      // A tick overlapping an in-flight beacon (or an explicit call) is dropped,
-      // not queued: the debounce makes the next tick equivalent.
+      // A tick overlapping ANOTHER TICK is dropped, not queued: the debounce
+      // makes the next tick equivalent. The gate is taken here and nowhere
+      // else, so it does not exclude an explicit ReportKeylessStateAsync call —
+      // it does not need to. The store writes on both paths are serialised on
+      // _stateLock, and the 24h debounce collapses the duplicate beacon.
       if (!_beaconGate.Wait(0)) return;
       try {
         var ks = KeylessStateWire.For(State);
@@ -822,13 +885,15 @@ namespace Keylight {
           return;
       }
 
-      var current = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
-      if (fields.TrialDurationDays.HasValue)
-        current.ProductTrialDurationDays = fields.TrialDurationDays;
-      if (fields.FreeTierEnabled.HasValue)
-        current.ProductFreeTierEnabled = fields.FreeTierEnabled;
-      _store.Save(current);
-      RefreshCache();
+      lock (_stateLock) {
+        var current = Cached() ?? new CachedState { FetchedAt = _nowSeconds() };
+        if (fields.TrialDurationDays.HasValue)
+          current.ProductTrialDurationDays = fields.TrialDurationDays;
+        if (fields.FreeTierEnabled.HasValue)
+          current.ProductFreeTierEnabled = fields.FreeTierEnabled;
+        _store.Save(current);
+        RefreshCache();
+      }
     }
 
     // ─── public API — sync wrappers ──────────────────────────────────────────
@@ -871,14 +936,21 @@ namespace Keylight {
     /// the <see cref="VerifyResult"/> (signature verification result). Call this
     /// after every write path that mutates the store so read paths always see
     /// current state without hitting disk or re-running Ed25519.
+    ///
+    /// <para>Takes <c>_stateLock</c>, so the load and the publish of both cache
+    /// fields are one step: a reader can never see a new lease paired with the
+    /// old (or a missing) verification result. Callers already inside the lock
+    /// may call it — Monitor is re-entrant.</para>
     /// </summary>
     private void RefreshCache() {
-      var loaded = _store.Load();
-      _cachedState = loaded;
-      _cachedVerifyResult = (loaded?.Lease != null)
-        ? Verifier.VerifyLease(loaded.Lease, _config.TrustedKeys, _nowSeconds(), Verifier.SkewSeconds)
-        : (VerifyResult?)null;
-      _cachePopulated = true;
+      lock (_stateLock) {
+        var loaded = _store.Load();
+        _cachedState = loaded;
+        _cachedVerifyResult = (loaded?.Lease != null)
+          ? Verifier.VerifyLease(loaded.Lease, _config.TrustedKeys, _nowSeconds(), Verifier.SkewSeconds)
+          : (VerifyResult?)null;
+        _cachePopulated = true;
+      }
     }
 
     /// <summary>
@@ -888,8 +960,25 @@ namespace Keylight {
     /// place instead of being re-derived at each call site.
     /// </summary>
     private CachedState? Cached() {
-      if (!_cachePopulated) RefreshCache();
-      return _cachedState;
+      lock (_stateLock) {
+        if (!_cachePopulated) RefreshCache();
+        return _cachedState;
+      }
+    }
+
+    /// <summary>
+    /// Reads the cached state and its verification result as one atomic pair,
+    /// priming the cache on first use. They are only meaningful together — a
+    /// lease observed without its <see cref="VerifyResult"/> would fault the
+    /// read paths — so every reader that needs both goes through here rather
+    /// than touching the two fields separately.
+    /// </summary>
+    private void Snapshot(out CachedState? state, out VerifyResult? verify) {
+      lock (_stateLock) {
+        if (!_cachePopulated) RefreshCache();
+        state = _cachedState;
+        verify = _cachedVerifyResult;
+      }
     }
 
     // ─── private helpers ─────────────────────────────────────────────────────
@@ -900,7 +989,7 @@ namespace Keylight {
     /// "gated" lease used by HasEntitlement.
     /// </summary>
     private Lease? GetCachedTrustedLease() {
-      var cached = Cached();
+      Snapshot(out var cached, out var verify);
       var now = _nowSeconds();
 
       if (_config.MaxOfflineDays > 0) {
@@ -909,10 +998,10 @@ namespace Keylight {
       }
 
       var raw = cached?.Lease;
-      if (raw == null) return null;
+      if (raw == null || verify == null) return null;
 
       // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
-      var r = _cachedVerifyResult!.Value;
+      var r = verify.Value;
       bool expired = now > raw.ExpiresAt + Verifier.SkewSeconds;
       return (Verifier.IsTrusted(r) && !expired && raw.Status != "expired") ? raw : null;
     }
@@ -932,11 +1021,11 @@ namespace Keylight {
     /// Same order as Rust <c>resolve_state</c> and C++ <c>resolve_with_trial_</c>.
     /// </summary>
     private KeylightState ResolveState() {
-      var cached = Cached();
+      Snapshot(out var cached, out var verify);
       var now = _nowSeconds();
       var rawLease = cached?.Lease;
 
-      if (rawLease != null && Verifier.IsTrusted(_cachedVerifyResult!.Value)) {
+      if (rawLease != null && verify != null && Verifier.IsTrusted(verify.Value)) {
         if (rawLease.Status == "fallback") return KeylightState.Limited;
         if (rawLease.Status == "expired") return KeylightState.Expired;
         if (rawLease.Status == "active") {

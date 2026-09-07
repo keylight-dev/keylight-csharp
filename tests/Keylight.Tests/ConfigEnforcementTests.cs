@@ -22,8 +22,10 @@ namespace Keylight.Tests {
   ///
   /// <b>Rule 4:</b> the rule applies wherever the fields ride. If /config
   /// verifies but a validate body caches unsigned settings, the check is one
-  /// route away from useless. C# has no keyless beacon, so /config and validate
-  /// are the complete set of routes here.
+  /// route away from useless. The routes are /config, validate, and the keyless
+  /// beacon; the beacon's half is covered by
+  /// <see cref="KeylessBeaconTests.With_RequireSignedConfig_an_unsigned_beacon_reply_is_not_cached"/>,
+  /// and all three land in the same <c>AbsorbConfigFields</c> gate.
   /// </remarks>
   public class ConfigEnforcementTests {
 

@@ -1,4 +1,6 @@
 #if UNITY_2021_3_OR_NEWER
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Keylight.Unity {
@@ -16,8 +18,11 @@ namespace Keylight.Unity {
   ///     .TrustedKeys(new Dictionary&lt;string, string&gt; { ["kid"] = "hex-pubkey" })
   ///     .Platform(Application.platform.ToString())
   ///     .Build());
-  /// await client.CheckOnLaunchAsync();
+  /// await KeylightUnity.CheckOnLaunchAsync(client);
   /// </code>
+  ///
+  /// Use <see cref="CheckOnLaunchAsync"/> rather than the client's own
+  /// <c>CheckOnLaunchAsync</c> — see that method for why.
   /// </summary>
   public static class KeylightUnity {
     /// <summary>
@@ -61,6 +66,37 @@ namespace Keylight.Unity {
       var store     = new UnityLeaseStore(leaseFilename);
       var transport = new UnityWebRequestTransport(config.BaseUrl, config.TenantId, config.ProductId, config.SdkKey);
       return new KeylightClient(config, store, transport);
+    }
+
+    /// <summary>
+    /// Unity's launch check. Runs <see cref="KeylightClient.CheckOnLaunchAsync"/>
+    /// and then stops the keyless heartbeat, so a Unity build beacons
+    /// <b>at launch only</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Call this from a MonoBehaviour's <c>Start</c> instead of the
+    /// client's own <c>CheckOnLaunchAsync</c>. The launch call itself runs on
+    /// Unity's main thread, which is what <see cref="UnityWebRequestTransport"/>
+    /// needs.</para>
+    ///
+    /// <para><b>Why the heartbeat is stopped.</b>
+    /// <see cref="KeylightClient.StartKeylessHeartbeat"/> — which the launch
+    /// check starts for you — schedules its ticks on a
+    /// <c>System.Threading.Timer</c>, i.e. a thread-pool thread.
+    /// <c>UnityWebRequest</c> is a main-thread-only object, so every tick would
+    /// throw where it constructs one; the beacon swallows the exception, which
+    /// makes it a silent no-op that still burns a timer thread. Stopping it is
+    /// honest about what Unity actually does. A coroutine-driven heartbeat that
+    /// can tick on the main thread is the follow-up.</para>
+    /// </remarks>
+    public static async Task CheckOnLaunchAsync(
+      KeylightClient client,
+      CancellationToken ct = default) {
+      // No ConfigureAwait(false): the core awaits with it everywhere, so this
+      // continuation is what hops back onto Unity's SynchronizationContext for
+      // the caller.
+      await client.CheckOnLaunchAsync(ct);
+      client.StopKeylessHeartbeat();
     }
   }
 }
