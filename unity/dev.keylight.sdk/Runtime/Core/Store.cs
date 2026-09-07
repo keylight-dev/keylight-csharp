@@ -41,6 +41,17 @@ namespace Keylight {
     /// (<see cref="KeylightState"/> has no FreeTier member) and no keyless beacon.
     /// </summary>
     public bool?   ProductFreeTierEnabled { get; set; }
+    /// <summary>Anonymous per-install id for the keyless beacon and for
+    /// free-tier → paid attribution on activate. Minted once, never rotated.</summary>
+    public string? FreeTierInstanceId { get; set; }
+    /// <summary>Wire string of the last state the beacon successfully reported
+    /// (<c>trial</c> / <c>free_tier</c> / <c>expired</c>). Debounce input.</summary>
+    public string? KeylessLastState { get; set; }
+    /// <summary>Unix seconds of the last HTTP-2xx beacon. Debounce input.</summary>
+    public long?   LastKeylessPingAt { get; set; }
+    /// <summary>Last successfully read hardware id, so <c>machine_hash</c> stays
+    /// stable across a transient probe failure. Never a random value.</summary>
+    public string? CachedHardwareId { get; set; }
   }
 
   /// <summary>Pluggable storage backend for the cached lease state.</summary>
@@ -159,8 +170,23 @@ namespace Keylight {
         sb.Append(state.ProductFreeTierEnabled.Value ? "true" : "false");
       }
 
+      AppendString(sb, "freeTierInstanceId", state.FreeTierInstanceId);
+      AppendString(sb, "keylessLastState", state.KeylessLastState);
+      if (state.LastKeylessPingAt.HasValue) {
+        sb.Append(",\"lastKeylessPingAt\":");
+        sb.Append(state.LastKeylessPingAt.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      }
+      AppendString(sb, "cachedHardwareId", state.CachedHardwareId);
+
       sb.Append('}');
       return sb.ToString();
+    }
+
+    private static void AppendString(System.Text.StringBuilder sb, string key, string? value) {
+      if (value == null) return;
+      sb.Append(",\"").Append(key).Append("\":\"");
+      JsonCodec.WriteEscapedString(sb, value);
+      sb.Append('"');
     }
 
     internal static CachedState? DeserializeCachedState(string json) {
@@ -177,6 +203,11 @@ namespace Keylight {
       state.ProductTrialDurationDays = cachedDays.HasValue ? (int)cachedDays.Value : (int?)null;
       state.ProductFreeTierEnabled = root.Get("productFreeTierEnabled")?.AsBool();
       state.Lease = WireHelpers.ParseLease(root.Get("lease"));
+
+      state.FreeTierInstanceId = root.Get("freeTierInstanceId")?.AsString();
+      state.KeylessLastState   = root.Get("keylessLastState")?.AsString();
+      state.LastKeylessPingAt  = root.Get("lastKeylessPingAt")?.AsLong();
+      state.CachedHardwareId   = root.Get("cachedHardwareId")?.AsString();
 
       return state;
     }

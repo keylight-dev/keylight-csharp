@@ -198,13 +198,13 @@ namespace Keylight {
       if (resp.Lease != null)
         VerifyOrReject(resp.Lease);
 
-      var state = new CachedState {
+      var state = Carry(Cached(), new CachedState {
         Lease      = resp.Lease,
         InstanceId = resp.InstanceId,
         // Required on every subsequent /validate and /deactivate.
         LicenseKey = licenseKey,
         FetchedAt  = _nowSeconds()
-      };
+      });
       _store.Save(state);
       RefreshCache();
     }
@@ -267,19 +267,13 @@ namespace Keylight {
       if (resp.Lease != null) {
         // Verify-or-reject before persisting the updated lease
         VerifyOrReject(resp.Lease);
-        var newState = new CachedState {
+        var newState = Carry(cached, new CachedState {
           Lease          = resp.Lease,
           InstanceId     = cached?.InstanceId,
           // Carry the key forward: every future check-in needs it on the wire.
           LicenseKey     = cached?.LicenseKey,
-          FetchedAt      = _nowSeconds(),
-          TrialStartedAt = cached?.TrialStartedAt,
-          // Carry the server-owned settings forward. This type is rebuilt from
-          // scratch rather than mutated, so a field omitted here is a field
-          // silently reset to the seed on the next validate.
-          ProductTrialDurationDays = cached?.ProductTrialDurationDays,
-          ProductFreeTierEnabled   = cached?.ProductFreeTierEnabled
-        };
+          FetchedAt      = _nowSeconds()
+        });
         _store.Save(newState);
         RefreshCache();
       } else if (!resp.Valid) {
@@ -291,19 +285,13 @@ namespace Keylight {
         // the next State/HasEntitlement read resolves to Invalid (or, if a
         // trial is configured and still running, falls back to Trial —
         // mirroring the same precedence DeactivateAsync already uses).
-        var newState = new CachedState {
+        var newState = Carry(cached, new CachedState {
           Lease          = null,
           InstanceId     = cached?.InstanceId,
           // Carry the key forward: every future check-in needs it on the wire.
           LicenseKey     = cached?.LicenseKey,
-          FetchedAt      = _nowSeconds(),
-          TrialStartedAt = cached?.TrialStartedAt,
-          // Carry the server-owned settings forward. This type is rebuilt from
-          // scratch rather than mutated, so a field omitted here is a field
-          // silently reset to the seed on the next validate.
-          ProductTrialDurationDays = cached?.ProductTrialDurationDays,
-          ProductFreeTierEnabled   = cached?.ProductFreeTierEnabled
-        };
+          FetchedAt      = _nowSeconds()
+        });
         _store.Save(newState);
         RefreshCache();
       }
@@ -472,8 +460,9 @@ namespace Keylight {
     }
 
     /// <summary>
-    /// Deactivates this device. Clears the local cache regardless of whether
-    /// the server call succeeds, mirroring JS/Rust parity.
+    /// Deactivates this device. Drops the license (lease, instance id, license
+    /// key) regardless of whether the server call succeeds, but keeps the
+    /// trial clock and keyless identity — see the comment below.
     /// </summary>
     public async Task DeactivateAsync(CancellationToken ct = default) {
       var instanceId = Cached()?.InstanceId;
@@ -484,11 +473,15 @@ namespace Keylight {
               new DeactivateRequest { LicenseKey = Cached()?.LicenseKey ?? "", InstanceId = instanceId! }, ct)
             .ConfigureAwait(false);
         } catch {
-          // Swallow network errors — cache is cleared regardless.
+          // Swallow network errors — the license is dropped regardless.
         }
       }
 
-      _store.Clear();
+      // Drop the license, keep the device: the trial clock must survive (or a
+      // deactivate would mint a fresh trial), and so must the keyless identity
+      // and the settings the dashboard already delivered. Mirrors C++ and Rust.
+      var kept = Carry(Cached(), new CachedState { FetchedAt = _nowSeconds() });
+      _store.Save(kept);
       RefreshCache();
     }
 
@@ -657,6 +650,23 @@ namespace Keylight {
       => DeactivateAsync().GetAwaiter().GetResult();
 
     // ─── cache management ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Copy every field a rebuilt <see cref="CachedState"/> must not lose:
+    /// the trial clock, the server-owned settings, and the keyless identity.
+    /// Every path that constructs a new state from an old one goes through
+    /// here, so a field added later is added in one place.
+    /// </summary>
+    private static CachedState Carry(CachedState? from, CachedState into) {
+      into.TrialStartedAt           = from?.TrialStartedAt;
+      into.ProductTrialDurationDays = from?.ProductTrialDurationDays;
+      into.ProductFreeTierEnabled   = from?.ProductFreeTierEnabled;
+      into.FreeTierInstanceId       = from?.FreeTierInstanceId;
+      into.KeylessLastState         = from?.KeylessLastState;
+      into.LastKeylessPingAt        = from?.LastKeylessPingAt;
+      into.CachedHardwareId         = from?.CachedHardwareId;
+      return into;
+    }
 
     /// <summary>
     /// Loads from disk once and caches both the <see cref="CachedState"/> and
