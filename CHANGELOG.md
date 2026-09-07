@@ -69,6 +69,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   further heartbeat starts. Licensed and `Limited` installs send nothing —
   only `Trial`, `FreeTier`, and elapsed-trial `Expired` devices beacon.
 
+  **Unity beacons at launch only.** The heartbeat ticks on a thread-pool timer
+  and `UnityWebRequest` is main-thread-only, so a tick could never send
+  anything. The new `KeylightUnity.CheckOnLaunchAsync(client)` runs the launch
+  check — beacon included — and then stops the heartbeat; use it instead of
+  `client.CheckOnLaunchAsync()` in Unity. A coroutine-driven heartbeat is a
+  follow-up.
+
 - **`CheckOnLaunchAsync` beacons instead of fetching `/config`, when the
   transport supports it.** An unlicensed install used to learn the trial
   length and free-tier flag only from `GET /config`; now, against a transport
@@ -96,14 +103,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `fallback` lease that used to reach an `Expired`/`Invalid` branch now reaches
   `Limited` instead. Persisted integer values are unaffected because both
   members are appended at the end.
-- **The state resolution order changed for two cases.** A stored license with
-  no usable lease still resolves to `Expired`, unchanged; but an elapsed trial
-  with the free tier enabled now resolves to `FreeTier` rather than `Expired`,
-  and a trusted lease with server status `fallback` now resolves to `Limited`
-  rather than `Expired`. A host branching on `State == KeylightState.Expired`
-  to decide "prompt to activate" should double-check it also means to prompt
-  a `FreeTier` or `Limited` install, since those are no longer folded into
-  `Expired`.
+- **The state resolution order changed for four cases.** Each one moves a state
+  a host may already be branching on:
+
+  1. **A stored license with no usable lease: `Invalid` → `Expired`.** Once a
+     license key has been activated on this device, a revoked, rejected, or
+     untrusted lease is a *lapsed* licence, not "never licensed" — and it no
+     longer falls through to a fresh trial or the free tier either. This is
+     what Rust `resolve_state` and C++ `resolve_with_trial_` already did.
+     **If you branch on `Invalid` to mean "revoked — prompt to re-activate",
+     that branch stops firing; move it to `Expired`.**
+  2. **An elapsed trial with the free tier enabled: `Expired` → `FreeTier`.**
+  3. **A never-trialled install with the free tier enabled: `Invalid` →
+     `FreeTier`.** A fresh install of a product whose dashboard has the free
+     tier on reports `FreeTier` as soon as it has heard from the server,
+     instead of being indistinguishable from a locked-out one.
+  4. **A trusted lease with server status `fallback`: `Expired` → `Limited`.**
+
+  A host branching on `State == KeylightState.Expired` to decide "prompt to
+  activate" should double-check it also means to prompt a `FreeTier` or
+  `Limited` install, since those are no longer folded into `Expired` — and one
+  branching on `Invalid` should re-read the list above, because `Invalid` now
+  means only "nothing has ever been licensed or offered on this device".
 - **`KeylightClient` now implements `IDisposable`.** Call `Dispose()` (or
   `StopKeylessHeartbeat()`) when tearing a client down if `StartKeylessHeartbeat`
   or `CheckOnLaunchAsync` may have started the heartbeat timer, so it does not

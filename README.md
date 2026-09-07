@@ -321,6 +321,12 @@ var config = KeylightConfig
     .Build();
 ```
 
+> **Unity beacons at launch only.** The heartbeat ticks on a thread-pool timer, and
+> `UnityWebRequest` is main-thread-only, so a tick could never send anything. Use
+> `KeylightUnity.CheckOnLaunchAsync(client)` instead of `client.CheckOnLaunchAsync()` — it runs the
+> launch check (beacon included) and then stops the heartbeat. See
+> [`unity/README.md`](unity/README.md#launch-check-use-keylightunitycheckonlaunchasync).
+
 `MachineHash()` computes the cross-SDK `machine_hash` sent alongside the beacon (and on activate
 and validate) from a real hardware identifier — never a randomly generated fallback — so the same
 physical machine dedupes across reinstalls. `FreeTierInstanceId()` is the anonymous per-install id
@@ -353,6 +359,11 @@ with Godot's .NET 6+ Mono runtime.
 under `unity/dev.keylight.sdk`. Install it via Unity's Package Manager (UPM) using the Git URL, or
 via [OpenUPM](https://openupm.com) once published. The package source is kept in sync with
 `src/Keylight` via `unity/sync-core.sh`.
+
+On Unity, call `await KeylightUnity.CheckOnLaunchAsync(client)` rather than
+`client.CheckOnLaunchAsync()`: `UnityWebRequest` is main-thread-only, so the background keyless
+heartbeat cannot send anything and the helper stops it. Unity beacons at launch only — see
+[`unity/README.md`](unity/README.md#launch-check-use-keylightunitycheckonlaunchasync).
 
 ## Conformance
 

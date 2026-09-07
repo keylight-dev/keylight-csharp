@@ -86,6 +86,27 @@ every build target: Standalone, iOS, Android, WebGL, consoles.
 `KeylightUnity.CreateClient(config)` wires everything up automatically — no
 configuration is required to get WebGL support.
 
+## Launch check: use `KeylightUnity.CheckOnLaunchAsync`
+
+```csharp
+var client = KeylightUnity.CreateClient(config);
+await KeylightUnity.CheckOnLaunchAsync(client);   // not client.CheckOnLaunchAsync()
+```
+
+**Unity beacons at launch only.** The core's keyless heartbeat — which
+`CheckOnLaunchAsync` normally starts, re-sending the anonymous beacon every six
+hours — runs its ticks on a `System.Threading.Timer`, i.e. a thread-pool thread.
+`UnityWebRequest` is main-thread-only, so a tick cannot send anything: it throws
+where it builds the request, and the beacon (which never throws by contract)
+swallows it. `KeylightUnity.CheckOnLaunchAsync` runs the launch check and then
+calls `StopKeylessHeartbeat()`, so the behaviour matches what actually happens.
+
+The launch beacon itself is unaffected — it is sent on the main thread, from your
+`Start`, and carries the same trial length and free-tier flag as anywhere else.
+An app that wants a mid-session beacon can call
+`client.ReportKeylessStateAsync(...)` from main-thread code (a coroutine, an
+`Update` timer). A coroutine-driven heartbeat inside the package is a follow-up.
+
 ## Ed25519 verification is pure-managed (IL2CPP-safe)
 
 Lease signature verification uses a pure C# Ed25519 implementation
@@ -113,7 +134,7 @@ The sample lands in `Assets/Samples/Keylight/<version>/Keylight Notes/`.
 ### What the sample does
 
 - On Start, calls `KeylightUnity.CreateClient(config)` and
-  `client.CheckOnLaunchAsync()` to refresh any cached lease.
+  `KeylightUnity.CheckOnLaunchAsync(client)` to refresh any cached lease.
 - On button press, calls `await client.ActivateAsync(keyInput.text)`.
 - In `Update()`, calls `client.HasEntitlement("pro")` (synchronous, safe on the
   main thread) to gate the visibility of the Pro panel.
