@@ -267,7 +267,10 @@ namespace Keylight.Tests {
       await client.ActiveRevalidateAsync();
 
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid: it is a lapsed license, not "never licensed" — cross-SDK
+      // resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
       Assert.False(client.HasEntitlement("pro"));
     }
 
@@ -286,7 +289,9 @@ namespace Keylight.Tests {
       await client.ActiveRevalidateAsync();
 
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
       Assert.False(client.HasEntitlement("pro"));
     }
 

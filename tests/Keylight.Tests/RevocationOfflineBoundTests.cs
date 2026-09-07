@@ -87,7 +87,9 @@ namespace Keylight.Tests {
       await client.CheckOnLaunchAsync();
 
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
     }
 
     // ─── (b) transient failure keeps access within cap ─────────────────────
@@ -167,7 +169,9 @@ namespace Keylight.Tests {
 
       await client.ValidateAsync();
 
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
       Assert.False(client.HasEntitlement("pro"));
     }
 
@@ -248,7 +252,9 @@ namespace Keylight.Tests {
       await client.ValidateAsync();
 
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
       Assert.False(client.HasEntitlement("pro"));
     }
 
@@ -267,7 +273,9 @@ namespace Keylight.Tests {
       await client.CheckOnLaunchAsync();
 
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
       Assert.False(client.HasEntitlement("pro"));
     }
 

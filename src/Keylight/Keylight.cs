@@ -525,8 +525,8 @@ namespace Keylight {
         // config has not arrived yet", so skipping the stamp leaves a
         // later-arriving duration nothing to measure from and the user never
         // gets the trial their tenant enabled. The stamp grants nothing on its
-        // own: CheckTrialOrInvalid still reports Invalid while the effective
-        // duration is 0.
+        // own: ResolveUnlicensed still reports Invalid (or FreeTier, if
+        // enabled) while the effective duration is 0.
         //
         // An existing stamp is never overwritten, so enabling a trial months
         // after an install does not hand it a fresh window — otherwise it would
@@ -731,48 +731,41 @@ namespace Keylight {
     /// <summary>
     /// Resolves <see cref="KeylightState"/> from the raw cached lease (no
     /// offline-grace gating for the status read — mirrors JS state() logic).
+    /// Same order as Rust <c>resolve_state</c> and C++ <c>resolve_with_trial_</c>.
     /// </summary>
     private KeylightState ResolveState() {
       var cached = Cached();
       var now = _nowSeconds();
-
       var rawLease = cached?.Lease;
-      if (rawLease == null) return CheckTrialOrInvalid();
 
-      // Reuse cached KidKnown + SignatureValid; recompute Expired fresh.
-      var r = _cachedVerifyResult!.Value;
-      if (!Verifier.IsTrusted(r)) return CheckTrialOrInvalid();
+      if (rawLease != null && Verifier.IsTrusted(_cachedVerifyResult!.Value)) {
+        if (rawLease.Status == "fallback") return KeylightState.Limited;
+        if (rawLease.Status == "expired") return KeylightState.Expired;
+        if (rawLease.Status == "active") {
+          bool stale = now > rawLease.ExpiresAt + Verifier.SkewSeconds;
+          bool beyondCap = _config.MaxOfflineDays > 0 && IsBeyondOfflineCap(cached!, now);
+          return (stale || beyondCap) ? KeylightState.Expired : KeylightState.Licensed;
+        }
+        return KeylightState.Expired; // unrecognised status
+      }
 
-      // Only "active" can resolve to anything other than Expired: a trusted
-      // lease that is expired / fallback (limited — the C# enum has no Limited
-      // member) / an unrecognised status all read as Expired.
-      if (rawLease.Status != "active") return KeylightState.Expired;
+      // A license was activated here but no usable lease remains (revoked,
+      // rejected, or untrusted): Expired, never a fresh trial or the free
+      // tier. Same order as Rust resolve_state and C++ resolve_with_trial_.
+      if (!string.IsNullOrEmpty(cached?.LicenseKey)) return KeylightState.Expired;
 
-      if (now > rawLease.ExpiresAt + Verifier.SkewSeconds) return KeylightState.Expired;
-
-      // Bound offline use: a signed lease can outlive MaxOfflineDays of no
-      // successful server contact. Once that cap is exceeded, State must stop
-      // reporting Licensed even though the cached lease itself hasn't expired
-      // yet — mirrors the gate GetCachedTrustedLease already applies to
-      // HasEntitlement.
-      if (_config.MaxOfflineDays > 0 && IsBeyondOfflineCap(cached!, now))
-        return KeylightState.Expired;
-
-      return KeylightState.Licensed;
+      return ResolveUnlicensed(cached, now);
     }
 
-    private KeylightState CheckTrialOrInvalid() {
+    /// <summary>Trial → free tier → elapsed trial → Invalid.</summary>
+    private KeylightState ResolveUnlicensed(CachedState? cached, long now) {
       var duration = EffectiveTrialDurationDays();
-      if (duration > 0) {
-        var trialStartedAt = Cached()?.TrialStartedAt;
-        if (trialStartedAt.HasValue) {
-          var trialEndSeconds = trialStartedAt.Value + (long)duration * 86400L;
-          return _nowSeconds() < trialEndSeconds
-            ? KeylightState.Trial
-            : KeylightState.Expired;
-        }
-      }
-      return KeylightState.Invalid;
+      var startedAt = cached?.TrialStartedAt;
+      bool trialRunning = duration > 0 && startedAt.HasValue && now < startedAt.Value + (long)duration * 86400L;
+      if (trialRunning) return KeylightState.Trial;
+      if (EffectiveFreeTierEnabled()) return KeylightState.FreeTier;
+      bool trialElapsed = duration > 0 && startedAt.HasValue;
+      return trialElapsed ? KeylightState.Expired : KeylightState.Invalid;
     }
 
     /// <summary>

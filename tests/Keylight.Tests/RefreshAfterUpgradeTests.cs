@@ -133,7 +133,9 @@ namespace Keylight.Tests {
 
       Assert.True(changed);
       Assert.Equal(1, transport.ValidateCalls);
-      Assert.Equal(KeylightState.Invalid, client.State);
+      // A stored license key with no usable lease resolves to Expired, not
+      // Invalid — cross-SDK resolution order (Task 4).
+      Assert.Equal(KeylightState.Expired, client.State);
     }
 
     [Fact]
