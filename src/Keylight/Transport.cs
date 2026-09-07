@@ -31,10 +31,21 @@ namespace Keylight {
   }
 
   /// <summary>
+  /// Optional transport capability: <c>POST {baseUrl}/{tenant}/{product}/keyless</c>.
+  /// Separate from <see cref="IKeylightTransport"/> for the same reason as
+  /// <see cref="IKeylightConfigTransport"/>: existing custom transports keep
+  /// compiling, and netstandard2.0 cannot dispatch a default interface method.
+  /// A transport without it simply never beacons.
+  /// </summary>
+  public interface IKeylightKeylessTransport {
+    Task<KeylessResponse?> ReportKeylessAsync(KeylessRequest req, CancellationToken ct = default);
+  }
+
+  /// <summary>
   /// Default transport that POSTs JSON to the Keylight API using <see cref="HttpClient"/>.
   /// URL pattern: <c>{baseUrl}/{tenantId}/{productId}/{action}</c>.
   /// </summary>
-  public sealed class HttpClientTransport : IKeylightTransport, IKeylightConfigTransport {
+  public sealed class HttpClientTransport : IKeylightTransport, IKeylightConfigTransport, IKeylightKeylessTransport {
     private readonly string _baseUrl;
     private readonly string _tenantId;
     private readonly string _productId;
@@ -108,6 +119,13 @@ namespace Keylight {
       var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
       var body = await ReadBodyAsync(response, ct).ConfigureAwait(false);
       return ConfigResponse.Parse(body);
+    }
+
+    public async Task<KeylessResponse?> ReportKeylessAsync(KeylessRequest req, CancellationToken ct = default) {
+      using var request = BuildRequest("keyless", req.ToJson());
+      var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+      var body = await ReadBodyAsync(response, ct).ConfigureAwait(false); // throws on non-2xx
+      return KeylessResponse.Parse(body);
     }
 
     public void Dispose() {

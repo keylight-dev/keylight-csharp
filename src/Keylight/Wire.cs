@@ -28,6 +28,8 @@ namespace Keylight {
     /// it, because a patched client sends whatever its author wants.
     /// </summary>
     public int? SdkTrialDurationDays { get; set; }
+    /// <summary>Cross-SDK machine hash; omitted when no hardware id exists.</summary>
+    public string? MachineHash { get; set; }
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
@@ -48,7 +50,8 @@ namespace Keylight {
         ["os_version"]    = Telemetry.Clamp(OsVersion, Telemetry.OsVersionMax),
         ["arch"]          = Telemetry.Clamp(Arch, Telemetry.ArchMax),
         ["free_tier_instance_id"] = FreeTierInstanceId,
-        ["sdk_trial_duration_days"] = SdkTrialDurationDays
+        ["sdk_trial_duration_days"] = SdkTrialDurationDays,
+        ["machine_hash"] = MachineHash
       };
       return JsonCodec.Stringify(obj);
     }
@@ -79,6 +82,8 @@ namespace Keylight {
     /// it, because a patched client sends whatever its author wants.
     /// </summary>
     public int? SdkTrialDurationDays { get; set; }
+    /// <summary>See ActivateRequest.</summary>
+    public string? MachineHash { get; set; }
 
     internal string ToJson() {
       var obj = new Dictionary<string, object?> {
@@ -95,7 +100,8 @@ namespace Keylight {
         // See ActivateRequest.ToJson.
         ["os_version"]  = Telemetry.Clamp(OsVersion, Telemetry.OsVersionMax),
         ["arch"]        = Telemetry.Clamp(Arch, Telemetry.ArchMax),
-        ["sdk_trial_duration_days"] = SdkTrialDurationDays
+        ["sdk_trial_duration_days"] = SdkTrialDurationDays,
+        ["machine_hash"] = MachineHash
       };
       return JsonCodec.Stringify(obj);
     }
@@ -113,6 +119,62 @@ namespace Keylight {
         ["instance_id"] = InstanceId
       };
       return JsonCodec.Stringify(obj);
+    }
+  }
+
+  /// <summary>Request body for the anonymous <c>/keyless</c> beacon.</summary>
+  public sealed class KeylessRequest {
+    public string InstanceId { get; set; } = "";
+    /// <summary><c>trial</c> / <c>free_tier</c> / <c>expired</c>.</summary>
+    public string State { get; set; } = "free_tier";
+    /// <summary>Cross-SDK machine hash; omitted when no hardware id exists.</summary>
+    public string? MachineHash { get; set; }
+    public string? AppVersion { get; set; }
+    public string? SdkVersion { get; set; }
+    public string? Platform { get; set; }
+    public string? CpuCores { get; set; }
+    public string? Memory { get; set; }
+    public string? OsVersion { get; set; }
+    public string? Arch { get; set; }
+
+    internal string ToJson() {
+      var obj = new Dictionary<string, object?> {
+        ["instance_id"]  = InstanceId,
+        ["state"]        = State,
+        ["machine_hash"] = MachineHash,
+        ["app_version"]  = Telemetry.Clamp(AppVersion, Telemetry.VersionMax),
+        ["sdk_version"]  = Telemetry.Clamp(SdkVersion, Telemetry.VersionMax),
+        ["platform"]     = Telemetry.Clamp(Platform, Telemetry.PlatformMax),
+        ["sdk"]          = Telemetry.SdkId,
+        ["cpu_cores"]    = Telemetry.Clamp(CpuCores, Telemetry.BucketMax),
+        ["memory"]       = Telemetry.Clamp(Memory, Telemetry.BucketMax),
+        ["os_version"]   = Telemetry.Clamp(OsVersion, Telemetry.OsVersionMax),
+        ["arch"]         = Telemetry.Clamp(Arch, Telemetry.ArchMax)
+      };
+      return JsonCodec.Stringify(obj);
+    }
+  }
+
+  /// <summary>Response body from <c>/keyless</c>. Carries the server-owned
+  /// settings for unlicensed installs, in the same signed envelope as
+  /// <c>/config</c> and <c>validate</c>.</summary>
+  public sealed class KeylessResponse {
+    public bool Received { get; set; }
+    public int? TrialDurationDays { get; set; }
+    public bool? FreeTierEnabled { get; set; }
+    public ProductConfigFields ConfigFields =>
+      new ProductConfigFields { TrialDurationDays = TrialDurationDays, FreeTierEnabled = FreeTierEnabled };
+    public ConfigSignature? ConfigSignature { get; set; }
+
+    internal static KeylessResponse? Parse(string json) {
+      var root = JsonCodec.Parse(json);
+      if (root == null) return null;
+      var resp = new KeylessResponse { Received = root.Get("received")?.AsBool() ?? false };
+      WireHelpers.ReadConfigFields(root, out var days, out var freeTier);
+      resp.TrialDurationDays = days;
+      resp.FreeTierEnabled = freeTier;
+      resp.ConfigSignature = WireHelpers.ReadConfigSignature(root);
+      return resp;
     }
   }
 
