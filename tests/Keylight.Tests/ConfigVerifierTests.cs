@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using Keylight;
 using Xunit;
 
@@ -111,5 +112,48 @@ public class ConfigVerifierTests {
   [Fact]
   public void Rejects_a_partial_config() {
     Assert.False(Verify(fields: Fields(freeTier: null)));
+  }
+
+  // Never throw: this runs on the response path, where a malformed body must
+  // become a rejected config, not a crash.
+
+  [Fact]
+  public void Null_kid_returns_false_rather_than_throwing() {
+    var sig = Sig(); sig.Kid = null!;
+    Assert.False(Verify(signature: sig));
+  }
+
+  [Fact]
+  public void Empty_kid_returns_false() {
+    var sig = Sig(); sig.Kid = "";
+    Assert.False(Verify(signature: sig));
+  }
+
+  [Fact]
+  public void Null_signature_envelope_returns_false() {
+    Assert.False(Verifier.VerifyConfig(Fields(), null!, TenantId, ProductId, Trusted(), InsideWindow));
+  }
+
+  [Fact]
+  public void Null_trusted_keys_returns_false_rather_than_throwing() {
+    Assert.False(Verifier.VerifyConfig(Fields(), Sig(), TenantId, ProductId, null!, InsideWindow));
+  }
+
+  // The canonical bytes must not depend on the process culture.
+
+  [Fact]
+  public void Canonical_payload_is_culture_invariant() {
+    var original = CultureInfo.CurrentCulture;
+    try {
+      // sv-SE formats negatives with U+2212 on ICU builds; de-DE groups digits
+      // under some format strings. Neither may leak into the preimage.
+      CultureInfo.CurrentCulture = new CultureInfo("sv-SE");
+      Assert.Equal(
+        "cfg1|k1|t|p|-1788695996|1788782396|14|true",
+        ConfigPayload.Canonical("k1", "t", "p", -1788695996, 1788782396, 14, true));
+      Assert.True(Verify(), "golden vector must still verify under a non-invariant culture");
+    } finally {
+      CultureInfo.CurrentCulture = original;
+    }
   }
 }

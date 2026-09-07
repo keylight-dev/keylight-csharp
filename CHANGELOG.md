@@ -5,6 +5,45 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-09-07
+
+### Added
+
+- **`EffectiveFreeTierEnabled()`.** The free-tier flag has ridden on every
+  validate and `/config` response since 0.3.0 and been cached, but nothing on
+  the client returned it. Same precedence as `EffectiveTrialDurationDays()`:
+  server value first, then the fallback — which is `false`, because
+  `KeylightConfig` has never carried a free-tier seed. The SDK still only
+  reports the flag; `KeylightState` has no free-tier member, so what a free
+  tier unlocks remains the host app's decision.
+
+- **`RefreshAfterUpgradeAsync(timeout?, pollInterval?, ct)`** — the post-purchase
+  polling loop the Swift, JS, and Rust SDKs already have, with the same
+  semantics. It snapshots the entitlement set and resolved `State` when called,
+  then validates every `pollInterval` (default 2 s, floored at 100 ms) until
+  either differs, returning `true` as soon as that happens; a definitive
+  rejection that changes state counts. Transient validate failures are
+  swallowed and polling continues. Returns `false` on timeout (default 30 s —
+  the final delay is capped so the call never overruns it), on cancellation, or
+  immediately and without a network call when no license is stored. Never
+  throws.
+
+### Fixed
+
+- **The canonical config payload was formatted with the current culture.**
+  `ConfigPayload.Canonical` interpolated `issuedAt`, `expiresAt`, and
+  `trialDurationDays` with the process culture, so a locale that formats
+  numbers differently (a non-ASCII minus sign under ICU, say) would produce
+  bytes the worker never signed and reject a valid config. Every numeric field
+  now uses `CultureInfo.InvariantCulture`, as `Store` already did; the golden
+  vector is additionally pinned under a non-invariant culture.
+
+- **`Verifier.VerifyConfig` could throw instead of returning `false`.** The
+  trusted-key lookup sat outside the `try`, so a `null` `kid` or a `null` key
+  dictionary surfaced as an exception on the response path. It now returns
+  `false` for a null or empty `kid`, a null signature envelope, and null
+  trusted keys — a malformed body is a rejected config, not a crash.
+
 ## [0.4.0] — 2026-09-06
 
 ### Added

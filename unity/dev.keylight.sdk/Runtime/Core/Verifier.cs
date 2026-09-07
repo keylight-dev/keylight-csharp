@@ -45,8 +45,12 @@ namespace Keylight {
         string tenantId, string productId,
         IReadOnlyDictionary<string, string> trustedKeys,
         long nowSeconds, int skewSeconds = SkewSeconds) {
-      if (fields == null || signature == null) return false;
+      // Every "cannot possibly verify" shape returns false rather than throwing:
+      // this runs on the response path, where an exception would turn a
+      // malformed body into a crash instead of a rejected config.
+      if (fields == null || signature == null || trustedKeys == null) return false;
       if (string.IsNullOrEmpty(signature.Signature)) return false;
+      if (string.IsNullOrEmpty(signature.Kid)) return false;
 
       if (nowSeconds + skewSeconds < signature.IssuedAt) return false;
       if (signature.ExpiresAt + skewSeconds < nowSeconds) return false;
@@ -55,9 +59,8 @@ namespace Keylight {
       // partial config was never signable and must not be treated as if it were.
       if (!fields.TrialDurationDays.HasValue || !fields.FreeTierEnabled.HasValue) return false;
 
-      if (!trustedKeys.TryGetValue(signature.Kid, out var pubB64)) return false;
-
       try {
+        if (!trustedKeys.TryGetValue(signature.Kid, out var pubB64)) return false;
         var pk = B64(pubB64);
         var sig = B64(signature.Signature);
         if (pk == null || pk.Length != 32 || sig == null) return false;

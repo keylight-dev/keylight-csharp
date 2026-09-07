@@ -390,6 +390,88 @@ namespace Keylight {
     }
 
     /// <summary>
+    /// Polls the server after a purchase or plan change until the stored
+    /// license's entitlements or resolved <see cref="State"/> differ from what
+    /// they were when the call started. Returns <c>true</c> as soon as either
+    /// changes, <c>false</c> on timeout, cancellation, or when no license is
+    /// stored (in which case nothing is sent). Never throws.
+    /// </summary>
+    /// <remarks>
+    /// The upgrade path is: the user pays in a browser, the dashboard updates
+    /// the license, and the app has no way to know except by asking. Rather
+    /// than make every host write the same polling loop, this one is shared
+    /// across the SDKs (Swift, JS, Rust) with identical semantics:
+    ///
+    /// <list type="bullet">
+    ///   <item>Defaults: 30 s <paramref name="timeout"/>, 2 s <paramref name="pollInterval"/>;
+    ///     the interval is floored at 100 ms so a mistaken zero cannot hammer the worker.</item>
+    ///   <item>A definitive rejection that changes state (a revoke landing
+    ///     mid-poll) counts as a change — the caller asked "did anything
+    ///     happen", not "did the good thing happen".</item>
+    ///   <item>Transient validate failures are swallowed and polling continues;
+    ///     a blip is not an answer.</item>
+    ///   <item>The final delay is capped to the time remaining, so the call
+    ///     never runs past <paramref name="timeout"/>.</item>
+    /// </list>
+    /// </remarks>
+    public async Task<bool> RefreshAfterUpgradeAsync(
+        TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken ct = default) {
+      var cached = Cached();
+      // No stored license: ValidateAsync would be a silent no-op, so polling
+      // could only ever time out. Say so immediately and send nothing.
+      if (cached == null || string.IsNullOrEmpty(cached.LicenseKey)) return false;
+      if (ct.IsCancellationRequested) return false;
+
+      var totalMillis = (long)(timeout ?? TimeSpan.FromSeconds(30)).TotalMilliseconds;
+      var pollMillis = Math.Max(100L, (long)(pollInterval ?? TimeSpan.FromSeconds(2)).TotalMilliseconds);
+
+      var beforeEntitlements = SnapshotEntitlements();
+      var beforeState = State;
+
+      // A local stopwatch rather than _monotonicMillis: the delays below are
+      // real wall time, and a test-injected monotonic clock that never advances
+      // would otherwise turn the timeout into an infinite loop.
+      var clock = System.Diagnostics.Stopwatch.StartNew();
+      while (true) {
+        // Validate first, sleep second — same order as Swift and Rust. The
+        // webhook has often already landed by the time the app regains focus,
+        // and a poll that sleeps before its first look wastes a full interval.
+        try {
+          await ValidateAsync(ct).ConfigureAwait(false);
+        } catch {
+          // Transient — ValidateAsync already swallows transport failures; this
+          // additionally absorbs a LeaseVerificationFailedException so one bad
+          // payload does not end the wait early.
+        }
+        if (ct.IsCancellationRequested) return false;
+
+        if (State != beforeState) return true;
+        if (!beforeEntitlements.SetEquals(SnapshotEntitlements())) return true;
+
+        var remaining = totalMillis - clock.ElapsedMilliseconds;
+        if (remaining <= 0) return false;
+
+        try {
+          await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(pollMillis, remaining)), ct)
+            .ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+          return false;
+        }
+        if (ct.IsCancellationRequested) return false;
+      }
+    }
+
+    /// <summary>The entitlement set <see cref="HasEntitlement"/> would consult
+    /// right now: the trusted lease's keys, or empty when there is none.</summary>
+    private System.Collections.Generic.HashSet<string> SnapshotEntitlements() {
+      var set = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+      var lease = GetCachedTrustedLease();
+      if (lease?.Entitlements != null)
+        foreach (var e in lease.Entitlements) set.Add(e);
+      return set;
+    }
+
+    /// <summary>
     /// Deactivates this device. Clears the local cache regardless of whether
     /// the server call succeeds, mirroring JS/Rust parity.
     /// </summary>
@@ -483,6 +565,23 @@ namespace Keylight {
     }
 
     /// <summary>
+    /// Free-tier flag actually in force: server value → <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same precedence as <see cref="EffectiveTrialDurationDays"/>. There is no
+    /// local seed for this one — <see cref="KeylightConfig"/> has never carried
+    /// a free-tier setting, so an install that has not yet heard from the
+    /// server reports <c>false</c>. The SDK only reports the flag; it does not
+    /// gate anything on it (<see cref="KeylightState"/> has no FreeTier member),
+    /// so what a free tier unlocks is the host app's decision.
+    /// </remarks>
+    public bool EffectiveFreeTierEnabled() {
+      var cached = Cached()?.ProductFreeTierEnabled;
+      if (cached.HasValue) return cached.Value;
+      return false;
+    }
+
+    /// <summary>
     /// Explicitly refresh the product config from <c>GET /{tenant}/{product}/config</c>.
     /// Never throws.
     /// </summary>
@@ -515,8 +614,8 @@ namespace Keylight {
       if (fields == null || fields.IsEmpty) return;
 
       // The one place signatures are checked, and deliberately the only one. The
-      // settings ride on /config, on /validate, and on the keyless beacon;
-      // verifying at any single route would leave the others as an
+      // settings ride on both /config and validate (this SDK has no keyless
+      // beacon); verifying at any single route would leave the other as an
       // unauthenticated way to write the same cache. Authentication is a
       // property of the fields, not of the endpoint they arrived on.
       //

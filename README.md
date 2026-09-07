@@ -136,6 +136,8 @@ await client.DeactivateAsync();
 | `RefreshIfNeededAsync()` | Validates only if due (debounce 5 min, stale 6 h, or within 24 h of expiry). Safe to call often. |
 | `CheckOnLaunchAsync()` | Convenience: refresh if a license is stored; also auto-starts the trial clock on first launch. |
 | `ActiveRevalidateAsync()` | Forces a validate on active use (foreground / popover / focus), debounced 60 s in memory. Bypasses the staleness gates so a revoke lands mid-session instead of at the next launch. Never throws; a transient failure never downgrades a live session. |
+| `RefreshAfterUpgradeAsync(timeout?, pollInterval?)` | Polls validate after a purchase or plan change until the entitlements or `State` differ from when the call started. Returns `true` on a change (a revoke counts), `false` on timeout, cancellation, or when no license is stored (nothing is sent). Defaults 30 s / 2 s; the interval is floored at 100 ms. Never throws. |
+| `FetchConfigAsync()` | Explicitly refreshes the server-owned product settings from `/config`. Never throws; a failure keeps the last known settings. `CheckOnLaunchAsync` already does this for unlicensed installs. |
 
 Synchronous wrappers `Activate(key)`, `Validate()`, and `Deactivate()` are provided for callers
 that cannot use `async`/`await` (every `await` in the async path uses `ConfigureAwait(false)`).
@@ -222,7 +224,7 @@ fresh. `ActiveRevalidateAsync` is the prompt one: it always talks to the server 
 waiting for the lease to expire or the app to relaunch. Wire it to whatever "the user is here
 now" signal your host has — app activation, window focus, menu-bar popover opening.
 
-Trials are local and offline-first. Set `TrialDurationDays` on the builder, then call
+Trials are local and offline-first. Set `TrialDurationDays` on the builder as a seed, then call
 `CheckOnLaunchAsync` — the trial clock is started automatically on the first launch when no trusted
 active license is present:
 
@@ -241,6 +243,40 @@ if (client.State == KeylightState.Trial)
 }
 ```
 
+### Server-owned settings
+
+The trial length and the free-tier flag are settings the **server** owns; you change them in the
+dashboard, not in a release. They ride on every validate response and on `/config`, which
+`CheckOnLaunchAsync` fetches for installs that have no license to validate. The value on the
+builder is only a seed for an install that has never reached the server.
+
+```csharp
+client.EffectiveTrialDurationDays(); // server value → TrialDurationDays seed → 0
+client.EffectiveFreeTierEnabled();   // server value → false (there is no seed)
+await client.FetchConfigAsync();     // refresh explicitly; failures keep the last known values
+```
+
+`EffectiveFreeTierEnabled` only reports the flag — `KeylightState` has no free-tier member, so what a
+free tier unlocks is your call. To verify these settings against the keys you compile in, see
+`.RequireSignedConfig(bool)` below.
+
+### After a purchase
+
+When the user buys or changes plan in a browser, the app only finds out by asking. Rather than
+write the polling loop yourself:
+
+```csharp
+if (await client.RefreshAfterUpgradeAsync())   // 30 s, polling every 2 s
+{
+    UnlockPaidFeatures();                       // entitlements or State changed
+}
+```
+
+It snapshots the entitlements and `State` when called, then validates every `pollInterval` until
+either differs, returning `true` as soon as that happens. A transient failure is swallowed and
+polling continues; a timeout, a cancelled token, or an install with no stored license returns
+`false` (the last of those sends nothing).
+
 ## Configuration Reference
 
 Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
@@ -250,7 +286,8 @@ Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
 | _(required)_ `Builder(tenantId, productId, sdkKey)` | `string` | — | Your Keylight tenant, product, and SDK key. All three are required. |
 | `.TrustedKeys(dict)` | `IDictionary<string,string>` | empty | Trusted Ed25519 public keys (`kid → base64`) for offline verification. |
 | `.MaxOfflineDays(n)` | `int` | `15` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
-| `.TrialDurationDays(n)` | `int` | — | Local trial length in days. Omit to disable trials. |
+| `.TrialDurationDays(n)` | `int` | — | Seed trial length in days, used until the server's value arrives. Omit to disable trials on a fresh install. |
+| `.RequireSignedConfig(bool)` | `bool` | `false` | Reject server-owned settings that do not carry a valid Ed25519 signature from `TrustedKeys`. Leave off unless your product is signed (the worker signs only products with a trial length configured); rejected settings fall back to the seed, never to what the server claimed. |
 | `.AppVersion(v)` | `string` | — | Reported in activation/validation telemetry. |
 | `.KeyPrefix(p)` | `string` | — | Client-side key-format check (e.g. `"PROD"`). |
 | `.BaseUrl(url)` | `string` | `https://api.keylight.dev` | API base URL. |
