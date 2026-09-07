@@ -33,6 +33,11 @@ namespace Keylight {
     /// </remarks>
     public bool RequireSignedConfig { get; }
 
+    /// <summary>How often an unlicensed install re-sends the keyless beacon.
+    /// Six hours by default; <see cref="TimeSpan.Zero"/> disables the heartbeat
+    /// entirely. See <see cref="ConfigBuilder.KeylessHeartbeat"/>.</summary>
+    public TimeSpan KeylessHeartbeatInterval { get; }
+
     private KeylightConfig(
       string tenantId,
       string productId,
@@ -44,7 +49,8 @@ namespace Keylight {
       string baseUrl,
       string? appVersion,
       string? platform,
-      bool requireSignedConfig)
+      bool requireSignedConfig,
+      TimeSpan keylessHeartbeatInterval)
     {
       TenantId = tenantId;
       ProductId = productId;
@@ -57,6 +63,7 @@ namespace Keylight {
       AppVersion = appVersion;
       Platform = platform;
       RequireSignedConfig = requireSignedConfig;
+      KeylessHeartbeatInterval = keylessHeartbeatInterval;
     }
 
     public static ConfigBuilder Builder(string tenantId, string productId, string sdkKey)
@@ -74,6 +81,7 @@ namespace Keylight {
       private string? _appVersion;
       private string? _platform;
       private bool _requireSignedConfig;
+      private TimeSpan _keylessHeartbeat = TimeSpan.FromHours(6);
 
       internal ConfigBuilder(string tenantId, string productId, string sdkKey) {
         _tenantId = tenantId;
@@ -126,6 +134,15 @@ namespace Keylight {
         return this;
       }
 
+      /// <summary>How often an unlicensed install re-sends the keyless beacon.
+      /// Six hours by default (matches the other SDKs and the server's write
+      /// gate); <see cref="TimeSpan.Zero"/> disables the heartbeat entirely.
+      /// The 24h beacon debounce still applies, so most ticks send nothing.</summary>
+      public ConfigBuilder KeylessHeartbeat(TimeSpan interval) {
+        _keylessHeartbeat = interval < TimeSpan.Zero ? TimeSpan.Zero : interval;
+        return this;
+      }
+
       public KeylightConfig Build() {
         if (string.IsNullOrEmpty(_tenantId))
           throw new ArgumentException("tenantId must not be empty.", nameof(_tenantId));
@@ -145,7 +162,8 @@ namespace Keylight {
           baseUrl: _baseUrl,
           requireSignedConfig: _requireSignedConfig,
           appVersion: _appVersion,
-          platform: _platform
+          platform: _platform,
+          keylessHeartbeatInterval: _keylessHeartbeat
         );
       }
     }

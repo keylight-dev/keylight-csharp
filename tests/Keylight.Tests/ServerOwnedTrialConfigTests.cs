@@ -307,6 +307,19 @@ namespace Keylight.Tests {
       Assert.Equal(14, client.EffectiveTrialDurationDays());
     }
 
+    /// A transport that implements the keyless beacon is preferred over /config,
+    /// even though this test file's own ConfigTransport never offers one — this
+    /// proves the precedence the launch path is supposed to have.
+    [Fact]
+    public async Task Launch_prefers_the_beacon_when_the_transport_has_one() {
+      var store = new MemoryLeaseStore();
+      var t = new KeylessTransport { Reply = _ => new KeylessResponse { Received = true, TrialDurationDays = 21 } };
+      var c = new KeylightClient(KeylightConfig.Builder("tenant1", "product1", "k").TrialDurationDays(14).Build(), store, t, () => T);
+      await c.CheckOnLaunchAsync();
+      Assert.Single(t.Beacons);
+      Assert.Equal(21, c.EffectiveTrialDurationDays());
+    }
+
     // ─── telemetry ──────────────────────────────────────────────────────────
 
     /// The diagnostic field reports the configured seed, not the effective value:

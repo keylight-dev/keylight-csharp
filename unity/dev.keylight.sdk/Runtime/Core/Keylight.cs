@@ -8,8 +8,16 @@ namespace Keylight {
   /// entitlement queries. Thread-safe for concurrent reads of <see cref="State"/>
   /// and <see cref="HasEntitlement"/>; async methods should not be called
   /// concurrently on the same instance.
+  ///
+  /// <para><b>Heartbeat concurrency.</b> Once <see cref="StartKeylessHeartbeat"/>
+  /// runs (directly, or via <see cref="CheckOnLaunchAsync"/>), the keyless beacon
+  /// fires on its own timer thread and may write the store concurrently with the
+  /// app's own calls (<see cref="ActivateAsync"/>, <see cref="ValidateAsync"/>,
+  /// etc.). This is the same contract the C++ SDK has, where the beacon runs on
+  /// its own thread. Call <see cref="Dispose"/> (or <see cref="StopKeylessHeartbeat"/>)
+  /// when tearing the client down.</para>
   /// </summary>
-  public sealed class KeylightClient {
+  public sealed class KeylightClient : IDisposable {
     private readonly KeylightConfig _config;
     private readonly ILeaseStore _store;
     private readonly IKeylightTransport _transport;
@@ -522,14 +530,6 @@ namespace Keylight {
       bool hasActiveLicense = trusted != null && trusted.Status == "active";
 
       if (!hasActiveLicense) {
-        // An unlicensed install makes no other call that could carry the
-        // server-owned settings. The other SDKs get them free on the keyless
-        // beacon; this one has no beacon, so /config is the only route that
-        // reaches a trial user — without this fetch the dashboard setting would
-        // never reach exactly the population it is for. Licensed installs skip
-        // it: ValidateAsync above already carried the settings.
-        await FetchConfigAsync(ct).ConfigureAwait(false);
-
         // Auto-start the trial: once, idempotent, and UNCONDITIONALLY — note
         // there is no `duration > 0` guard here, deliberately.
         //
@@ -543,6 +543,11 @@ namespace Keylight {
         // An existing stamp is never overwritten, so enabling a trial months
         // after an install does not hand it a fresh window — otherwise it would
         // be farmable by reinstalling.
+        //
+        // Stamped BEFORE the beacon/config call below: a brand-new install's
+        // State resolves to Invalid until the free-tier id (and, on some
+        // installs, the trial clock) exists, so the beacon this launch sends
+        // must see the post-stamp state.
         var current = _cachedState ?? new CachedState { FetchedAt = _nowSeconds() };
         if (!current.TrialStartedAt.HasValue) {
           current.TrialStartedAt = _nowSeconds();
@@ -553,7 +558,19 @@ namespace Keylight {
           _store.Save(current);
           RefreshCache();
         }
+
+        // An unlicensed install learns the dashboard settings from the keyless
+        // beacon, like every other SDK. Debounced 24h, so this is at most one
+        // call a day. A transport without the beacon keeps the /config fetch.
+        if (_transport is IKeylightKeylessTransport) {
+          var ks = KeylessStateWire.For(State);
+          if (ks.HasValue) await ReportKeylessStateAsync(ks.Value, ct).ConfigureAwait(false);
+        } else {
+          await FetchConfigAsync(ct).ConfigureAwait(false);
+        }
       }
+
+      StartKeylessHeartbeat();
     }
 
     // ─── server-owned product config ─────────────────────────────────────────
@@ -711,6 +728,59 @@ namespace Keylight {
         // Best-effort and anonymous: a store failure anywhere above must not
         // throw out of this method.
       }
+    }
+
+    // ─── keyless heartbeat ───────────────────────────────────────────────────
+
+    private System.Threading.Timer? _heartbeat;
+    private readonly object _heartbeatLock = new object();
+    private readonly SemaphoreSlim _beaconGate = new SemaphoreSlim(1, 1);
+    private volatile bool _disposed;
+
+    /// <summary>
+    /// Start the keyless heartbeat: every <see cref="KeylightConfig.KeylessHeartbeatInterval"/>
+    /// an unlicensed install re-sends the beacon (subject to the 24h debounce).
+    /// Idempotent. Started for you by <see cref="CheckOnLaunchAsync"/>; call it
+    /// directly only if you never call that. The first tick is one interval
+    /// away, never immediate. Licensed and limited installs send nothing.
+    /// </summary>
+    public void StartKeylessHeartbeat() {
+      var interval = _config.KeylessHeartbeatInterval;
+      if (interval <= TimeSpan.Zero || _disposed) return;
+      if (_transport is not IKeylightKeylessTransport) return;
+      lock (_heartbeatLock) {
+        if (_heartbeat != null) return;
+        _heartbeat = new System.Threading.Timer(_ => HeartbeatTick(), null, interval, interval);
+      }
+    }
+
+    /// <summary>Stop the heartbeat. Safe to call when it is not running.</summary>
+    public void StopKeylessHeartbeat() {
+      lock (_heartbeatLock) {
+        _heartbeat?.Dispose();
+        _heartbeat = null;
+      }
+    }
+
+    private void HeartbeatTick() {
+      if (_disposed) return;
+      // A tick overlapping an in-flight beacon (or an explicit call) is dropped,
+      // not queued: the debounce makes the next tick equivalent.
+      if (!_beaconGate.Wait(0)) return;
+      try {
+        var ks = KeylessStateWire.For(State);
+        if (ks.HasValue) ReportKeylessStateAsync(ks.Value).GetAwaiter().GetResult();
+      } catch {
+        // The beacon never throws, but the timer thread must never die either.
+      } finally {
+        _beaconGate.Release();
+      }
+    }
+
+    /// <summary>Stops the heartbeat and marks the client disposed. Safe to call twice.</summary>
+    public void Dispose() {
+      _disposed = true;
+      StopKeylessHeartbeat();
     }
 
     /// <summary>
