@@ -10,12 +10,15 @@ namespace Keylight {
   /// concurrently on the same instance.
   ///
   /// <para><b>Heartbeat concurrency.</b> Once <see cref="StartKeylessHeartbeat"/>
-  /// runs (directly, or via <see cref="CheckOnLaunchAsync"/>), the keyless beacon
-  /// fires on its own timer thread and may write the store concurrently with the
-  /// app's own calls (<see cref="ActivateAsync"/>, <see cref="ValidateAsync"/>,
-  /// etc.). This is the same contract the C++ SDK has, where the beacon runs on
-  /// its own thread. Call <see cref="Dispose"/> (or <see cref="StopKeylessHeartbeat"/>)
-  /// when tearing the client down.</para>
+  /// runs (directly, or via <see cref="CheckOnLaunchAsync"/>), <see cref="HeartbeatTick"/>
+  /// runs <see cref="ReportKeylessStateAsync"/> on a thread-pool timer thread rather
+  /// than on a thread the app controls. Its only store write is the post-2xx
+  /// marker save (plus <see cref="AbsorbConfigFields"/>) inside that method, so in
+  /// a narrow window that write can race a save from an app-initiated
+  /// <see cref="ActivateAsync"/> or <see cref="ValidateAsync"/> call — the same
+  /// contract the C++ SDK has, where the beacon runs on its own thread. Call
+  /// <see cref="Dispose"/> (or <see cref="StopKeylessHeartbeat"/>) when tearing
+  /// the client down.</para>
   /// </summary>
   public sealed class KeylightClient : IDisposable {
     private readonly KeylightConfig _config;
@@ -746,10 +749,13 @@ namespace Keylight {
     /// </summary>
     public void StartKeylessHeartbeat() {
       var interval = _config.KeylessHeartbeatInterval;
-      if (interval <= TimeSpan.Zero || _disposed) return;
+      if (interval <= TimeSpan.Zero) return;
       if (_transport is not IKeylightKeylessTransport) return;
       lock (_heartbeatLock) {
-        if (_heartbeat != null) return;
+        // Re-checked under the lock: Dispose() sets _disposed under this same
+        // lock, so a Start/Dispose race cannot construct a Timer that never
+        // gets torn down (see StopKeylessHeartbeat/Dispose below).
+        if (_disposed || _heartbeat != null) return;
         _heartbeat = new System.Threading.Timer(_ => HeartbeatTick(), null, interval, interval);
       }
     }
@@ -779,8 +785,11 @@ namespace Keylight {
 
     /// <summary>Stops the heartbeat and marks the client disposed. Safe to call twice.</summary>
     public void Dispose() {
-      _disposed = true;
-      StopKeylessHeartbeat();
+      lock (_heartbeatLock) {
+        _disposed = true;
+        _heartbeat?.Dispose();
+        _heartbeat = null;
+      }
     }
 
     /// <summary>

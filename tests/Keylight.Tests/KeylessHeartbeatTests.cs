@@ -32,7 +32,7 @@ namespace Keylight.Tests {
     public async Task First_tick_is_at_plus_interval_never_immediate() {
       var t = new KeylessTransport();
       var store = new MemoryLeaseStore();
-      store.Save(new CachedState { FetchedAt = T, KeylessLastState = "free_tier", LastKeylessPingAt = T - 10, ProductFreeTierEnabled = true });
+      store.Save(new CachedState { FetchedAt = T, ProductFreeTierEnabled = true });
       using var c = Client(t, TimeSpan.FromHours(1), store);
       c.StartKeylessHeartbeat();
       await Task.Delay(150);
@@ -86,6 +86,22 @@ namespace Keylight.Tests {
       c.StartKeylessHeartbeat();
       c.Dispose();
       t.Beacons.Clear();
+      await Task.Delay(200);
+      Assert.Empty(t.Beacons);
+    }
+
+    [Fact]
+    public async Task Dispose_before_start_leaves_the_heartbeat_off() {
+      // Regression for the Start/Dispose race: _disposed must be checked and
+      // set under the same lock as the Timer construction/teardown, or a
+      // Dispose that lands between the guard check and the lock acquisition
+      // in StartKeylessHeartbeat would leak a rooted, never-disposed Timer.
+      var t = new KeylessTransport();
+      var store = new MemoryLeaseStore();
+      store.Save(new CachedState { FetchedAt = T, ProductFreeTierEnabled = true });
+      var c = Client(t, TimeSpan.FromMilliseconds(30), store);
+      c.Dispose();
+      c.StartKeylessHeartbeat();
       await Task.Delay(200);
       Assert.Empty(t.Beacons);
     }
