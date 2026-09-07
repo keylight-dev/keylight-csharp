@@ -39,6 +39,7 @@ Licensing shouldn't mean bolting a heavyweight, phone-home-or-die SDK onto your 
 - [Entitlements](#entitlements)
 - [Offline Validation](#offline-validation)
 - [Refresh and Trials](#refresh-and-trials)
+- [Keyless Devices](#keyless-devices)
 - [Configuration Reference](#configuration-reference)
 - [Godot and Unity](#godot-and-unity)
 - [Conformance](#conformance)
@@ -134,10 +135,13 @@ await client.DeactivateAsync();
 | `ValidateAsync()` | Re-checks the stored license online. Updates the cache if the server returns a new lease; network failures are non-fatal. |
 | `DeactivateAsync()` | Releases the seat and clears local license state, even if the network call fails. Call on uninstall or device switch. |
 | `RefreshIfNeededAsync()` | Validates only if due (debounce 5 min, stale 6 h, or within 24 h of expiry). Safe to call often. |
-| `CheckOnLaunchAsync()` | Convenience: refresh if a license is stored; also auto-starts the trial clock on first launch. |
+| `CheckOnLaunchAsync()` | Convenience: refresh if a license is stored; auto-starts the trial clock on first launch; reports the keyless beacon for unlicensed installs and starts the keyless heartbeat. |
 | `ActiveRevalidateAsync()` | Forces a validate on active use (foreground / popover / focus), debounced 60 s in memory. Bypasses the staleness gates so a revoke lands mid-session instead of at the next launch. Never throws; a transient failure never downgrades a live session. |
 | `RefreshAfterUpgradeAsync(timeout?, pollInterval?)` | Polls validate after a purchase or plan change until the entitlements or `State` differ from when the call started. Returns `true` on a change (a revoke counts), `false` on timeout, cancellation, or when no license is stored (nothing is sent). Defaults 30 s / 2 s; the interval is floored at 100 ms. Never throws. |
-| `FetchConfigAsync()` | Explicitly refreshes the server-owned product settings from `/config`. Never throws; a failure keeps the last known settings. `CheckOnLaunchAsync` already does this for unlicensed installs. |
+| `FetchConfigAsync()` | Explicitly refreshes the server-owned product settings from `/config`. Never throws; a failure keeps the last known settings. Used as a fallback by `CheckOnLaunchAsync` when the transport has no keyless beacon. |
+| `ReportKeylessStateAsync(state)` | Reports an unlicensed device's `KeylessState` (`Trial`, `FreeTier`, or `Expired`) to the server, so free-tier and trial usage shows up without a license key. Debounced 24 h unless the state changed. Never throws. `CheckOnLaunchAsync` calls this for you. |
+| `FreeTierInstanceId()` | Anonymous per-install id used for keyless attribution, minted once and persisted. Sent as `free_tier_instance_id` on `ActivateAsync` so a free-tier device that buys is counted once. |
+| `StartKeylessHeartbeat()` / `StopKeylessHeartbeat()` | Starts (or stops) a background timer that re-sends the keyless beacon every `KeylessHeartbeat` interval. `CheckOnLaunchAsync` starts it for you; call `Dispose()` on the client when tearing it down. |
 
 Synchronous wrappers `Activate(key)`, `Validate()`, and `Deactivate()` are provided for callers
 that cannot use `async`/`await` (every `await` in the async path uses `ConfigureAwait(false)`).
@@ -151,7 +155,9 @@ that cannot use `async`/`await` (every `await` in the async path uses `Configure
 |-------|---------|
 | `Licensed` | Current, signature-valid `active` lease. |
 | `Trial` | No license, but a local trial is active. |
-| `Expired` | Lease expired, or a previously stored license is no longer current. Also mapped from lease `status: "fallback"` (cross-SDK note: Swift and Rust surface a distinct `Limited` state; C# maps it to `Expired`). |
+| `FreeTier` | No license and no running trial, but the product has the free tier enabled — including after a trial elapses, if the free tier is on. |
+| `Expired` | Lease expired, or a previously stored license is no longer current; or the trial elapsed with no free tier enabled. |
+| `Limited` | Trusted lease with server status `fallback` — the server could not mint a full lease, so the app should run degraded rather than lock out. |
 | `Invalid` | No valid lease and no trial in progress. |
 
 ```csharp
@@ -161,7 +167,11 @@ switch (client.State)
         // full access
         break;
     case KeylightState.Trial:
-        // trial UI
+    case KeylightState.FreeTier:
+        // trial / free-tier UI
+        break;
+    case KeylightState.Limited:
+        // degraded but running
         break;
     case KeylightState.Expired:
     case KeylightState.Invalid:
@@ -246,9 +256,10 @@ if (client.State == KeylightState.Trial)
 ### Server-owned settings
 
 The trial length and the free-tier flag are settings the **server** owns; you change them in the
-dashboard, not in a release. They ride on every validate response and on `/config`, which
-`CheckOnLaunchAsync` fetches for installs that have no license to validate. The value on the
-builder is only a seed for an install that has never reached the server.
+dashboard, not in a release. They ride on every validate response and on the keyless beacon (or on
+`/config`, for a transport that has no beacon), which `CheckOnLaunchAsync` calls for installs that
+have no license to validate. The value on the builder is only a seed for an install that has never
+reached the server.
 
 ```csharp
 client.EffectiveTrialDurationDays(); // server value → TrialDurationDays seed → 0
@@ -256,8 +267,8 @@ client.EffectiveFreeTierEnabled();   // server value → false (there is no seed
 await client.FetchConfigAsync();     // refresh explicitly; failures keep the last known values
 ```
 
-`EffectiveFreeTierEnabled` only reports the flag — `KeylightState` has no free-tier member, so what a
-free tier unlocks is your call. To verify these settings against the keys you compile in, see
+`EffectiveFreeTierEnabled` reports the flag that drives `KeylightState.FreeTier` — see
+[License States](#license-states). To verify these settings against the keys you compile in, see
 `.RequireSignedConfig(bool)` below.
 
 ### After a purchase
@@ -277,6 +288,44 @@ either differs, returning `true` as soon as that happens. A transient failure is
 polling continues; a timeout, a cancelled token, or an install with no stored license returns
 `false` (the last of those sends nothing).
 
+## Keyless Devices
+
+A trial or free-tier install has no license key, so without something else the server has no way
+to know it exists. The **keyless beacon** is that something else: an anonymous, best-effort ping
+that reports the device's `KeylessState` (`Trial`, `FreeTier`, or `Expired`) so it shows up in your
+dashboard, and so a device that later buys is counted as one conversion rather than two devices.
+
+It's automatic — `CheckOnLaunchAsync` reports the beacon on launch (for a transport that supports
+it) and starts a background heartbeat that repeats it every `KeylessHeartbeatInterval`, so you do
+not need to call `ReportKeylessStateAsync` yourself in the common case:
+
+```csharp
+var client = new KeylightClient(config);
+await client.CheckOnLaunchAsync(); // beacons if unlicensed, then starts the heartbeat
+// ...
+client.Dispose(); // stop the heartbeat when the client goes away
+```
+
+The beacon is debounced to once per 24 hours unless the reported state changes, in which case it
+sends immediately. It never throws and never sends a randomly generated device id in place of a
+real hardware one — see `MachineHash()` below.
+
+To turn it off, set the heartbeat interval to zero on the builder; `CheckOnLaunchAsync` still sends
+one beacon (or falls back to `/config`) on launch, but nothing repeats it in the background:
+
+```csharp
+var config = KeylightConfig
+    .Builder("your-tenant", "your-product", "sdk_live_…")
+    .KeylessHeartbeat(TimeSpan.Zero) // disable the repeating heartbeat
+    .Build();
+```
+
+`MachineHash()` computes the cross-SDK `machine_hash` sent alongside the beacon (and on activate
+and validate) from a real hardware identifier — never a randomly generated fallback — so the same
+physical machine dedupes across reinstalls. `FreeTierInstanceId()` is the anonymous per-install id
+carried on the beacon and sent as `free_tier_instance_id` on `ActivateAsync`, so a free-tier device
+that converts to paid is attributed once.
+
 ## Configuration Reference
 
 Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
@@ -288,6 +337,7 @@ Built with `KeylightConfig.Builder(tenantId, productId, sdkKey)`:
 | `.MaxOfflineDays(n)` | `int` | `15` | Offline grace window since last online validation. Set `0` to run offline as long as the lease itself is current. |
 | `.TrialDurationDays(n)` | `int` | — | Seed trial length in days, used until the server's value arrives. Omit to disable trials on a fresh install. |
 | `.RequireSignedConfig(bool)` | `bool` | `false` | Reject server-owned settings that do not carry a valid Ed25519 signature from `TrustedKeys`. Leave off unless your product is signed (the worker signs only products with a trial length configured); rejected settings fall back to the seed, never to what the server claimed. |
+| `.KeylessHeartbeat(interval)` | `TimeSpan` | 6 hours | How often an unlicensed install re-sends the keyless beacon (see [Keyless Devices](#keyless-devices)). The 24h beacon debounce still applies, so most ticks send nothing. `TimeSpan.Zero` disables the heartbeat entirely. |
 | `.AppVersion(v)` | `string` | — | Reported in activation/validation telemetry. |
 | `.KeyPrefix(p)` | `string` | — | Client-side key-format check (e.g. `"PROD"`). |
 | `.BaseUrl(url)` | `string` | `https://api.keylight.dev` | API base URL. |

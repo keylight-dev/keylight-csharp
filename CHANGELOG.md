@@ -5,6 +5,114 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-09-07
+
+### Added
+
+- **Keyless beacon — `ReportKeylessStateAsync(KeylessState, ct)`.** Unlicensed
+  installs (trial, free tier, or elapsed trial) can now be counted by the
+  server the same way the Swift, Rust, and JS SDKs already are, instead of
+  being invisible until they activate. `KeylessState` is `Trial`, `FreeTier`,
+  or `Expired`; `CheckOnLaunchAsync` reports the right one automatically once
+  a trial has started, so most hosts never call this directly. Debounced to
+  once per 24h **unless the state changed**, so a device that flips from
+  `Trial` to `FreeTier` (or the reverse) is reported immediately regardless of
+  when it last checked in. The debounce markers are written only on a
+  successful call, so a failed beacon retries on the next opportunity rather
+  than going quiet for a day. Anonymous and best-effort: it never throws, and
+  a store failure anywhere in the path — including the writes
+  `FreeTierInstanceId()` and `MachineHash()` make on their own — is swallowed.
+  The response carries the server-owned trial length and free-tier flag and
+  goes through the same `RequireSignedConfig` gate as `/config` and validate,
+  because authentication is a property of the fields, not of the endpoint
+  they arrived on.
+
+- **`MachineHash()` — a stable, cross-SDK `machine_hash` sent on activate,
+  validate, and the keyless beacon.** Lets the server dedupe the same physical
+  machine across reinstalls and across a free-tier-to-paid conversion, instead
+  of treating every install as a new device. Sourced from a real hardware id
+  via the new `IDeviceIdentity` interface — `IOPlatformUUID` on macOS, the
+  64-bit-view registry `MachineGuid` on Windows, `/etc/machine-id` (falling
+  back to the D-Bus id) on Linux — and, in the Unity package, from
+  `SystemInfo.deviceUniqueIdentifier`, fed in via
+  `SystemDeviceIdentity.SetHardwareId` when `KeylightUnity.CreateClient` builds
+  the client. The last successfully read id is cached and reused on a
+  transient read failure, so the hash stays stable across a bad call — but
+  when no hardware id has ever been read, the field is simply omitted.
+  **Never a randomly generated fallback**: a random value would defeat the
+  cross-install dedupe the hash exists for.
+
+- **`FreeTierInstanceId()` and attribution.** An anonymous per-install id,
+  minted once on first trial start (or first beacon) and persisted forever,
+  sent as `free_tier_instance_id` on `ActivateAsync` so a device that tries
+  the product for free and later buys is counted once rather than as two
+  separate devices. The id is only ever reused, never minted at activation
+  time, so a device with no keyless history attributes nothing.
+
+- **`KeylightState.FreeTier` and `KeylightState.Limited`.** An unlicensed
+  device with the free-tier flag enabled now resolves to `FreeTier` — trial
+  running still wins first, and an elapsed trial with the free tier enabled
+  lands on `FreeTier` rather than `Expired`. A trusted lease with server
+  status `fallback` now resolves to its own `Limited` state — previously C#
+  mapped `fallback` to `Expired` to match Swift and Rust's public surface
+  before they had a dedicated member for it; now all three agree. Both
+  members are appended after `Invalid` so a value already persisted to disk
+  keeps its meaning.
+
+- **`KeylessHeartbeat(TimeSpan)` on the builder, 6-hour default.** Once
+  `CheckOnLaunchAsync` starts it (or a host calls `StartKeylessHeartbeat()`
+  directly), an unlicensed install re-sends the beacon every interval,
+  subject to the same 24h debounce — so in practice most ticks send nothing
+  and this only matters for a session that outlives a day. Pass
+  `TimeSpan.Zero` to disable the heartbeat entirely. `StopKeylessHeartbeat()`
+  stops it early; `Dispose()` stops it and marks the client unusable for
+  further heartbeat starts. Licensed and `Limited` installs send nothing —
+  only `Trial`, `FreeTier`, and elapsed-trial `Expired` devices beacon.
+
+- **`CheckOnLaunchAsync` beacons instead of fetching `/config`, when the
+  transport supports it.** An unlicensed install used to learn the trial
+  length and free-tier flag only from `GET /config`; now, against a transport
+  that implements the new keyless capability, it learns them from the same
+  beacon call that reports its state — one round-trip instead of two. A
+  transport that does not implement the keyless interface keeps fetching
+  `/config` exactly as before, so a custom transport is unaffected until it
+  opts in.
+
+- **`DeactivateAsync` and `ActivateAsync` now keep the trial clock and keyless
+  identity.** Deactivating drops the license (lease, instance id, license
+  key) but no longer resets `TrialStartedAt`, the free-tier instance id, the
+  keyless debounce markers, or the cached hardware id — a deactivate-then-
+  reactivate no longer mints a fresh trial or a fresh attribution id.
+  Activating carries the same fields forward and sends whatever free-tier
+  instance id already exists (never minting one at that point) so attribution
+  survives the free-tier-to-paid conversion it exists for.
+
+### Breaking
+
+- **`KeylightState` gains `FreeTier` and `Limited`.** Both are appended after
+  `Invalid`, so any code that switches exhaustively on the enum (or persists
+  its integer value across a version) needs to add a case — an existing
+  `default` arm still compiles and, for `Limited`, changes behavior: a
+  `fallback` lease that used to reach an `Expired`/`Invalid` branch now reaches
+  `Limited` instead. Persisted integer values are unaffected because both
+  members are appended at the end.
+- **The state resolution order changed for two cases.** A stored license with
+  no usable lease still resolves to `Expired`, unchanged; but an elapsed trial
+  with the free tier enabled now resolves to `FreeTier` rather than `Expired`,
+  and a trusted lease with server status `fallback` now resolves to `Limited`
+  rather than `Expired`. A host branching on `State == KeylightState.Expired`
+  to decide "prompt to activate" should double-check it also means to prompt
+  a `FreeTier` or `Limited` install, since those are no longer folded into
+  `Expired`.
+- **`KeylightClient` now implements `IDisposable`.** Call `Dispose()` (or
+  `StopKeylessHeartbeat()`) when tearing a client down if `StartKeylessHeartbeat`
+  or `CheckOnLaunchAsync` may have started the heartbeat timer, so it does not
+  keep the process alive or tick against a disposed client.
+- **The test-seam constructor gained a trailing optional `IDeviceIdentity?
+  device` parameter.** Binary-breaking (existing compiled callers of that
+  overload need to recompile), source-compatible (the parameter is optional,
+  so existing call sites keep compiling unchanged).
+
 ## [0.4.1] — 2026-09-07
 
 ### Added
