@@ -21,3 +21,6 @@ unity/**/[Uu]ser[Ss]ettings/
 unity/**/*.pidb.meta
 unity/**/*.pdb.meta
 unity/**/.DS_Store
+
+# git worktrees
+.worktrees/
