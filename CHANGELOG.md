@@ -5,6 +5,24 @@ All notable changes to the Keylight C# SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-09-08
+
+### Fixed
+
+- **The Unity package did not compile inside Unity.** `Transport.cs` and
+  `Keyset.cs` guarded the `ReadAsStringAsync` call with `#if NETSTANDARD2_0`,
+  a symbol only the NuGet build defines. Unity defines `NET_STANDARD_2_1`
+  instead, so the editor compiled the `.NET 5+` branch and failed with
+  `CS1501: No overload for method 'ReadAsStringAsync' takes 1 arguments` on
+  every release since 0.1.2. The guard is now `#if NET5_0_OR_GREATER`, which
+  is the only runtime that has the `CancellationToken` overload. Verified
+  against Unity 6000.5's own .NET Standard 2.1 reference assembly and its
+  standalone `UnityEngine` DLLs.
+- **CI now compiles the Unity mirror the way Unity does.** A new
+  `tests/Keylight.UnityCompat` project builds `Runtime/Core` for
+  `netstandard2.1` with Unity's defines and no `UnityEngine`, so a
+  NuGet-only API can no longer slip through the plain `dotnet test`.
+
 ## [0.5.0] — 2026-09-07
 
 ### Added

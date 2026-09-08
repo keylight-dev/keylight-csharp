@@ -79,10 +79,11 @@ namespace Keylight {
 
       if ((int)response.StatusCode != 200) return null;
 
-#if NETSTANDARD2_0
-      var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-#else
+#if NET5_0_OR_GREATER
       var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+#else
+      // .NET Standard 2.0/2.1 and Unity's BCL have no CancellationToken overload.
+      var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 #endif
       return Parse(body);
     }

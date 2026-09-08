@@ -4,5 +4,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Keylight.Tests/Keylight.Tests.csproj" />
+    <Project Path="tests/Keylight.UnityCompat/Keylight.UnityCompat.csproj" />
   </Folder>
 </Solution>

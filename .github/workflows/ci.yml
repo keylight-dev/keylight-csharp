@@ -19,3 +19,6 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --configuration Release
       - run: dotnet test --configuration Release
+      # Unity compiles Runtime/Core against .NET Standard 2.1 with its own defines;
+      # this build fails on any API that only exists on .NET 5+.
+      - run: dotnet build tests/Keylight.UnityCompat --configuration Release

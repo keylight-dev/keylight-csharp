@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Compiles the Unity mirror's Core folder the way Unity does: .NET Standard 2.1
+    BCL surface, Unity's preprocessor defines, no UnityEngine. Unity never
+    defines NETSTANDARD2_0 / NET8_0, so any #if that picks a .NET 5+ API by
+    default breaks only inside the editor. This project fails CI first.
+    Not a test project; `dotnet build` is the check.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Keylight</RootNamespace>
+    <AssemblyName>Keylight.UnityCompat</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>UNITY_2018_1_OR_NEWER;UNITY_2021_3_OR_NEWER;NET_STANDARD_2_1;NET_STANDARD</DefineConstants>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../unity/dev.keylight.sdk/Runtime/Core/**/*.cs" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,6 @@
 {
   "name": "dev.keylight.sdk",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "displayName": "Keylight",
   "description": "Offline-first licensing for Unity — signed Ed25519 leases, activations, entitlements.",
   "unity": "2021.3",
