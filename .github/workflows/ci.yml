@@ -2,7 +2,13 @@ name: CI
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Three runners so the native hardware-id probes (registry MachineGuid,
+    # IOPlatformUUID, /etc/machine-id) are exercised for real, not mocked.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
